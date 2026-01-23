@@ -4,16 +4,15 @@
     "lecture_1769165470.109371": {
       "name": "Solar System",
       "study_date": "2025-12-26",
-      "difficulty": 3,
+      "difficulty": 2,
       "category": "Geography",
       "revision_dates": {
-        "R1": "2025-12-30",
-        "R2": "2026-01-07",
-        "R3": "2026-01-19",
-        "R4": "2026-02-09",
-        "R5": "2026-03-11",
-        "R6": "2026-04-17",
-        "R7": "2026-05-10"
+        "R1": "2025-12-31",
+        "R2": "2026-01-08",
+        "R3": "2026-01-22",
+        "R4": "2026-02-15",
+        "R5": "2026-03-22",
+        "R6": "2026-05-04"
       }
     },
     "lecture_1769165765.329349_1": {
@@ -255,30 +254,55 @@
         "R6": "2026-04-22",
         "R7": "2026-05-11"
       }
-    },
-    "lecture_1769165765.33211_17": {
-      "name": "Dams Lakes and Waterfalls",
-      "study_date": "2026-01-17",
-      "difficulty": 3,
-      "category": "Geography",
-      "revision_dates": {
-        "R1": "2026-01-20",
-        "R2": "2026-01-27",
-        "R3": "2026-02-06",
-        "R4": "2026-02-24",
-        "R5": "2026-03-22",
-        "R6": "2026-04-23",
-        "R7": "2026-05-12"
-      }
     }
   },
   "persons": {
     "Harsh": {
-      "grades": {},
+      "grades": {
+        "lecture_1769165765.331727_15_R1": "SKIP",
+        "lecture_1769165765.331727_15_R2": "PERFECT",
+        "lecture_1769165470.109371_R1": "PERFECT",
+        "lecture_1769165765.329525_2_R1": "PERFECT",
+        "lecture_1769165765.330224_6_R1": "PERFECT",
+        "lecture_1769165765.330065_5_R1": "PERFECT",
+        "lecture_1769165765.329349_1_R1": "PERFECT",
+        "lecture_1769165765.329728_3_R1": "PERFECT",
+        "lecture_1769165765.330546_8_R1": "PERFECT",
+        "lecture_1769165765.331217_12_R1": "PERFECT",
+        "lecture_1769165765.329897_4_R1": "SKIP",
+        "lecture_1769165765.330387_7_R1": "SKIP",
+        "lecture_1769165765.330738_9_R1": "SKIP",
+        "lecture_1769165765.330896_10_R1": "SKIP",
+        "lecture_1769165765.331052_11_R1": "SKIP",
+        "lecture_1769165765.331376_13_R1": "SKIP",
+        "lecture_1769165765.331529_14_R1": "SKIP",
+        "lecture_1769165765.331912_16_R1": "SKIP",
+        "lecture_1769165470.109371_R2": "PERFECT"
+      },
       "emergency_revisions": {}
     },
     "Divya": {
-      "grades": {},
+      "grades": {
+        "lecture_1769165765.331727_15_R2": "PERFECT",
+        "lecture_1769165765.331727_15_R1": "PERFECT",
+        "lecture_1769165470.109371_R1": "PERFECT",
+        "lecture_1769165765.329525_2_R1": "PERFECT",
+        "lecture_1769165765.330224_6_R1": "PERFECT",
+        "lecture_1769165765.330065_5_R1": "PERFECT",
+        "lecture_1769165765.329349_1_R1": "PERFECT",
+        "lecture_1769165765.329728_3_R1": "PERFECT",
+        "lecture_1769165765.330546_8_R1": "PERFECT",
+        "lecture_1769165765.331217_12_R1": "PERFECT",
+        "lecture_1769165765.329897_4_R1": "SKIP",
+        "lecture_1769165765.330387_7_R1": "SKIP",
+        "lecture_1769165765.330738_9_R1": "SKIP",
+        "lecture_1769165765.330896_10_R1": "SKIP",
+        "lecture_1769165765.331052_11_R1": "SKIP",
+        "lecture_1769165765.331376_13_R1": "SKIP",
+        "lecture_1769165765.331912_16_R1": "SKIP",
+        "lecture_1769165765.331529_14_R1": "SKIP",
+        "lecture_1769165470.109371_R2": "PERFECT"
+      },
       "emergency_revisions": {}
     }
   }
