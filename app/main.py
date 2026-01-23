@@ -216,8 +216,9 @@ def get_missed_revisions(data, person):
                     "category": lecture["category"]
                 })
     
-    # Sort by overdue days (highest priority first)
-    missed_revisions.sort(key=lambda x: x["overdue_days"], reverse=True)
+    # Sort by stage first (EMERGENCY, R1-R7), then by overdue days
+    stage_order = {"EMERGENCY": 0, "R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
+    missed_revisions.sort(key=lambda x: (stage_order.get(x["stage"], 9), -x["overdue_days"]))
     return missed_revisions
 
 
