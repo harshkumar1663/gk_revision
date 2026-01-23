@@ -568,7 +568,7 @@ def view_revision_plan():
                     "Sort by Study Date:",
                     ["Newest First", "Oldest First"],
                     horizontal=True,
-                    key=f"sort_order_{category}"
+                    key=f"sort_order_{category}_{st.session_state.current_person}"
                 )
                 
                 # Sort lectures by study date
