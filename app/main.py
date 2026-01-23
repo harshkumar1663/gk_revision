@@ -260,8 +260,8 @@ def check_emergency_revision_needed(data, person, lecture_id):
         elif grade == "SKIP":
             skip_count += 1
     
-    # Inject emergency if 2+ FAILs or 3+ SKIPs
-    if fail_count >= 2 or skip_count >= 3:
+    # Inject emergency if 2+ FAILs or 2+ SKIPs
+    if fail_count >= 2 or skip_count >= 2:
         # Create emergency revision for tomorrow
         tomorrow = format_date_for_storage(datetime.now() + timedelta(days=1))
         emergency_id = f"{lecture_id}_emergency_{datetime.now().timestamp()}"
@@ -327,7 +327,7 @@ def view_home():
     col1, col2 = st.columns([2, 1])
     with col1:
         exam_date_input = st.date_input(
-            "📅 Exam Date (Global Ceiling)",
+            "📅 Exam Date",
             value=datetime.strptime(data["exam_date"], "%Y-%m-%d").date() if data["exam_date"] else None,
             key="exam_date_input",
             format="DD/MM/YYYY"
