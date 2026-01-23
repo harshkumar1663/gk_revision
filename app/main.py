@@ -583,9 +583,15 @@ def view_revision_plan():
                 
                 # Display lectures in this category
                 for lecture_id, lecture in sorted_lectures:
-                    # Format title with name and date aligned at 40% from right
-                    lecture_title = f"📚 {lecture['name']:<50} {format_date_compact(lecture['study_date'])}"
-                    with st.expander(lecture_title, expanded=False):
+                    # Use columns to create proper alignment with date at 40% from right
+                    col_name, col_date = st.columns([2.4, 1])
+                    with col_name:
+                        lecture_title = f"📚 {lecture['name']}"
+                    with col_date:
+                        st.write(f"**{format_date_compact(lecture['study_date'])}**")
+                    
+                    # Create an invisible expander with the full content
+                    with st.expander("Click to edit", expanded=False):
                         
                         # Inline editing form
                         with st.form(key=f"edit_form_{lecture_id}"):
