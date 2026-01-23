@@ -48,7 +48,8 @@ GRADES = ["FAIL", "PARTIAL", "PERFECT", "SKIP"]
 PERSONS = ["Harsh", "Divya"]
 CATEGORIES = ["History", "Geography", "Polity", "Economy", "Science", "Current Affairs", "Miscellaneous"]
 
-DATA_FILE = Path("/media/harsh/Projects/Quizz/gk_data.json")
+# Use relative path for data file (works both locally and on Streamlit Cloud)
+DATA_FILE = Path(__file__).parent.parent / "gk_data.json"
 
 # Date formatting helpers
 def format_date_for_display(date_str):
