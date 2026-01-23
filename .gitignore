@@ -1,0 +1,30 @@
+# Virtual environment
+quiz/
+venv/
+env/
+*.egg-info/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Streamlit
+.streamlit/secrets.toml
+.streamlit/cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.env
+
+# Data (optional - if you want to keep local)
+# gk_data.json
