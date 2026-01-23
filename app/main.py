@@ -583,8 +583,12 @@ def view_revision_plan():
                 
                 # Display lectures in this category
                 for lecture_id, lecture in sorted_lectures:
-                    lecture_title = f"📚 {lecture['name']} ({format_date_compact(lecture['study_date'])})"
+                    lecture_title = f"📚 {lecture['name']}"
                     with st.expander(lecture_title, expanded=False):
+                        # Display study date prominently at top
+                        st.caption(f"📅 Study Date: {format_date_compact(lecture['study_date'])}")
+                        st.divider()
+                        
                         # Inline editing form
                         with st.form(key=f"edit_form_{lecture_id}"):
                             col1, col2, col3 = st.columns([2, 2, 2])
@@ -650,37 +654,46 @@ def view_revision_plan():
                         
                         st.divider()
                         
-                        # Revision stages
+                        # Revision stages in a grid layout
                         st.write("**Revision Stages:**")
+                        st.write("")
                         
-                        cols = st.columns(7)
-                        for idx, (stage, date_str) in enumerate(lecture["revision_dates"].items()):
-                            with cols[idx]:
-                                grade_key = f"{lecture_id}_{stage}"
-                                grade = data["persons"][st.session_state.current_person]["grades"].get(grade_key)
-                                
-                                if grade:
-                                    # Done - show with grade
-                                    button_label = f"{stage}\n{format_date_compact(date_str)}\n✓ {grade}"
-                                    button_type = "secondary"
+                        # Create a grid of revision buttons
+                        for stage_idx in range(0, len(lecture["revision_dates"]), 2):
+                            cols = st.columns(2)
+                            
+                            for col_idx, col in enumerate(cols):
+                                stage_num = stage_idx + col_idx
+                                if stage_num < len(lecture["revision_dates"]):
+                                    stage = list(lecture["revision_dates"].keys())[stage_num]
+                                    date_str = lecture["revision_dates"][stage]
                                     
-                                    if st.button(button_label, key=f"done_{lecture_id}_{stage}", 
-                                               use_container_width=True, type=button_type):
-                                        # Undo: restore date
-                                        del data["persons"][st.session_state.current_person]["grades"][grade_key]
-                                        save_data(data)
-                                        st.rerun()
-                                else:
-                                    # Pending - show date
-                                    button_label = f"{stage}\n{format_date_compact(date_str)}"
-                                    button_type = "primary"
-                                    
-                                    if st.button(button_label, key=f"pending_{lecture_id}_{stage}",
-                                               use_container_width=True, type=button_type):
-                                        # Mark as done (default PERFECT)
-                                        grade_revision(data, st.session_state.current_person,
-                                                     lecture_id, stage, "PERFECT")
-                                        st.rerun()
+                                    with col:
+                                        grade_key = f"{lecture_id}_{stage}"
+                                        grade = data["persons"][st.session_state.current_person]["grades"].get(grade_key)
+                                        
+                                        if grade:
+                                            # Done - show with grade
+                                            button_label = f"{stage}\n{format_date_compact(date_str)}\n✓ {grade}"
+                                            button_type = "secondary"
+                                            
+                                            if st.button(button_label, key=f"done_{lecture_id}_{stage}", 
+                                                       use_container_width=True, type=button_type):
+                                                # Undo: restore date
+                                                del data["persons"][st.session_state.current_person]["grades"][grade_key]
+                                                save_data(data)
+                                                st.rerun()
+                                        else:
+                                            # Pending - show date
+                                            button_label = f"{stage}\n{format_date_compact(date_str)}"
+                                            button_type = "primary"
+                                            
+                                            if st.button(button_label, key=f"pending_{lecture_id}_{stage}",
+                                                       use_container_width=True, type=button_type):
+                                                # Mark as done (default PERFECT)
+                                                grade_revision(data, st.session_state.current_person,
+                                                             lecture_id, stage, "PERFECT")
+                                                st.rerun()
 
 
 # =======================
