@@ -28,3 +28,5 @@ __pycache__/
 
 # Data (optional - if you want to keep local)
 # gk_data.json
+
+./app/.streamlit/secrets.toml

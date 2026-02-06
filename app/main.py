@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 import json
 import os
 from pathlib import Path
+import base64
+import requests
 
 # Page config
 st.set_page_config(
@@ -51,6 +53,13 @@ CATEGORIES = ["History", "Geography", "Polity", "Economy", "Science", "Current A
 # Use relative path for data file (works both locally and on Streamlit Cloud)
 DATA_FILE = Path(__file__).parent.parent / "gk_data.json"
 
+# GitHub storage configuration
+GITHUB_OWNER = "harshkumar1663"
+GITHUB_REPO = "gk_revision_data"
+GITHUB_BRANCH = "main"
+GITHUB_FILE_PATH = "gk_data.json"
+GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+
 # Date formatting helpers
 def format_date_for_display(date_str):
     """Convert YYYY-MM-DD to DD/MM/YY for display"""
@@ -78,20 +87,73 @@ if "current_view" not in st.session_state:
     st.session_state.current_view = "Home"
 
 
-def load_data():
-    """Load data from JSON file with legacy migration support"""
-    if not DATA_FILE.exists():
-        return {
-            "exam_date": None,
-            "lectures": {},
-            "persons": {
-                "Harsh": {"grades": {}, "emergency_revisions": {}},
-                "Divya": {"grades": {}, "emergency_revisions": {}}
-            }
+def _default_data():
+    return {
+        "exam_date": None,
+        "lectures": {},
+        "persons": {
+            "Harsh": {"grades": {}, "emergency_revisions": {}},
+            "Divya": {"grades": {}, "emergency_revisions": {}}
         }
-    
-    with open(DATA_FILE, 'r') as f:
-        data = json.load(f)
+    }
+
+
+def _github_headers():
+    try:
+        token = st.secrets.get("GITHUB_TOKEN")
+    except Exception:
+        token = None
+    if not token:
+        print("[GitHub] Missing GITHUB_TOKEN in Streamlit secrets.")
+        return None
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "streamlit-gk-revision-app"
+    }
+
+
+def _log_github_error(prefix, response):
+    try:
+        body = response.text
+    except Exception:
+        body = "<no response body>"
+    print(f"[GitHub] {prefix} failed: {response.status_code} {body}")
+
+
+def load_data():
+    """Load data from GitHub JSON file with legacy migration support"""
+    headers = _github_headers()
+    if not headers:
+        return _default_data()
+
+    try:
+        response = requests.get(
+            GITHUB_API_URL,
+            headers=headers,
+            params={"ref": GITHUB_BRANCH},
+            timeout=10
+        )
+    except requests.RequestException:
+        return _default_data()
+
+    if response.status_code == 404:
+        return _default_data()
+
+    if not response.ok:
+        _log_github_error("GET", response)
+        return _default_data()
+
+    payload = response.json()
+    content_b64 = payload.get("content", "")
+    if not content_b64:
+        return _default_data()
+
+    try:
+        decoded = base64.b64decode(content_b64).decode("utf-8")
+        data = json.loads(decoded)
+    except (ValueError, json.JSONDecodeError):
+        return _default_data()
     
     # Migrate legacy schema if needed
     if "persons" not in data:
@@ -112,10 +174,61 @@ def load_data():
 
 
 def save_data(data):
-    """Save data to JSON file"""
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(DATA_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+    """Save data to GitHub JSON file"""
+    headers = _github_headers()
+    if not headers:
+        return
+
+    json_string = json.dumps(data, indent=2)
+
+    try:
+        get_response = requests.get(
+            GITHUB_API_URL,
+            headers=headers,
+            params={"ref": GITHUB_BRANCH},
+            timeout=10
+        )
+    except requests.RequestException:
+        return
+
+    sha = None
+    if get_response.ok:
+        existing_payload = get_response.json()
+        sha = existing_payload.get("sha")
+        existing_content = existing_payload.get("content", "")
+        if existing_content:
+            try:
+                existing_decoded = base64.b64decode(existing_content).decode("utf-8")
+                if existing_decoded == json_string:
+                    return
+            except (ValueError, json.JSONDecodeError):
+                pass
+    elif get_response.status_code != 404:
+        _log_github_error("GET (sha)", get_response)
+        return
+
+    content_b64 = base64.b64encode(json_string.encode("utf-8")).decode("utf-8")
+    payload = {
+        "message": "update gk data",
+        "content": content_b64,
+        "branch": GITHUB_BRANCH
+    }
+    if sha:
+        payload["sha"] = sha
+
+    try:
+        put_response = requests.put(
+            GITHUB_API_URL,
+            headers=headers,
+            json=payload,
+            timeout=10
+        )
+    except requests.RequestException:
+        return
+
+    if not put_response.ok:
+        _log_github_error("PUT", put_response)
+        return
 
 
 def calculate_revision_dates(study_date_str, exam_date_str, difficulty):
@@ -220,6 +333,153 @@ def get_missed_revisions(data, person):
     stage_order = {"EMERGENCY": 0, "R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
     missed_revisions.sort(key=lambda x: (stage_order.get(x["stage"], 9), -x["overdue_days"]))
     return missed_revisions
+
+
+def _revision_load(difficulty):
+    if difficulty <= 2:
+        return 1
+    if difficulty == 3:
+        return 2
+    return 3
+
+
+def _get_revision_date_str(data, person, rev):
+    if rev.get("stage") == "EMERGENCY":
+        emergency_id = rev.get("emergency_id")
+        if emergency_id:
+            emergency = data["persons"][person].get("emergency_revisions", {}).get(emergency_id)
+            if emergency:
+                return emergency.get("date")
+        return None
+    lecture = data["lectures"].get(rev.get("lecture_id"), {})
+    return lecture.get("revision_dates", {}).get(rev.get("stage"))
+
+
+def _collect_pending_revisions_window(data, person, start_date, end_date):
+    pending = []
+
+    for lecture_id, lecture in data["lectures"].items():
+        for stage, date_str in lecture["revision_dates"].items():
+            revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            if revision_date < start_date or revision_date > end_date:
+                continue
+            grade_key = f"{lecture_id}_{stage}"
+            grade = data["persons"][person]["grades"].get(grade_key)
+            if grade:
+                continue
+            pending.append({
+                "lecture_id": lecture_id,
+                "lecture_name": lecture["name"],
+                "stage": stage,
+                "date": format_date_for_display(date_str),
+                "difficulty": lecture["difficulty"],
+                "category": lecture["category"],
+                "date_str": date_str,
+                "moved_by_dlb": False
+            })
+
+    for emergency_id, emergency in data["persons"][person].get("emergency_revisions", {}).items():
+        if emergency.get("completed"):
+            continue
+        emergency_date = datetime.strptime(emergency["date"], "%Y-%m-%d").date()
+        if emergency_date < start_date or emergency_date > end_date:
+            continue
+        pending.append({
+            "lecture_id": emergency["lecture_id"],
+            "lecture_name": emergency["lecture_name"],
+            "stage": "EMERGENCY",
+            "date": format_date_for_display(emergency["date"]),
+            "difficulty": emergency.get("difficulty", 3),
+            "category": emergency.get("category", ""),
+            "emergency_id": emergency_id,
+            "date_str": emergency["date"],
+            "moved_by_dlb": False
+        })
+
+    return pending
+
+
+def apply_daily_load_balancing(data, person, todays_revisions):
+    """Post-process today's revisions to smooth daily load without altering schedules."""
+    today = datetime.now().date()
+
+    adjusted = []
+    for rev in todays_revisions:
+        date_str = _get_revision_date_str(data, person, rev)
+        rev_copy = dict(rev)
+        rev_copy["date_str"] = date_str
+        rev_copy["moved_by_dlb"] = False
+        adjusted.append(rev_copy)
+
+    def load_of_list(items):
+        return sum(_revision_load(item.get("difficulty", 3)) for item in items)
+
+    def days_to_exam(date_str):
+        if not date_str or not data.get("exam_date"):
+            return 0
+        exam_date = datetime.strptime(data["exam_date"], "%Y-%m-%d").date()
+        revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        return (exam_date - revision_date).days
+
+    # D5 — High Difficulty Spread
+    high_diff = [r for r in adjusted if r.get("difficulty", 3) >= 4 and not r.get("moved_by_dlb")]
+    if len(high_diff) > 2:
+        high_diff.sort(key=lambda r: (
+            r.get("difficulty", 3),
+            -days_to_exam(r.get("date_str")),
+            r.get("lecture_name", "")
+        ))
+        extras = high_diff[2:]
+        for extra in extras:
+            extra["moved_by_dlb"] = True
+            adjusted.remove(extra)
+
+    # D4 — Overload Smoothing
+    missed_exists = len(get_missed_revisions(data, person)) > 0
+    target_threshold = 9 if missed_exists else 7
+
+    def push_candidate(items):
+        candidates = [
+            r for r in items
+            if not r.get("moved_by_dlb") and r.get("stage") != "EMERGENCY"
+        ]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda r: (
+            r.get("difficulty", 3),
+            -days_to_exam(r.get("date_str")),
+            r.get("lecture_name", "")
+        ))
+        return candidates[0]
+
+    while load_of_list(adjusted) > target_threshold:
+        candidate = push_candidate(adjusted)
+        if not candidate:
+            break
+        candidate["moved_by_dlb"] = True
+        adjusted.remove(candidate)
+
+    # D3 — No-Zero Rule
+    if load_of_list(adjusted) == 0:
+        window_start = today + timedelta(days=1)
+        window_end = today + timedelta(days=3)
+        future_pending = _collect_pending_revisions_window(data, person, window_start, window_end)
+
+        if future_pending:
+            non_hard = [r for r in future_pending if r.get("difficulty", 3) < 5]
+            candidates = non_hard if non_hard else future_pending
+            candidates.sort(key=lambda r: (
+                datetime.strptime(r["date_str"], "%Y-%m-%d").date(),
+                r.get("difficulty", 3),
+                r.get("lecture_name", "")
+            ))
+            pulled = candidates[0]
+            pulled["moved_by_dlb"] = True
+            pulled["date"] = format_date_for_display(format_date_for_storage(today))
+            pulled["date_str"] = format_date_for_storage(today)
+            adjusted.append(pulled)
+
+    return adjusted
 
 
 def calculate_risk_score(data, person, lecture_id):
@@ -367,6 +627,7 @@ def view_home():
     
     # Today's revisions
     todays = get_todays_revisions(data, st.session_state.current_person)
+    todays = apply_daily_load_balancing(data, st.session_state.current_person, todays)
     
     # Sort by stage: EMERGENCY first, then R1, R2, R3, R4, R5, R6, R7
     stage_order = {"EMERGENCY": 0, "R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
