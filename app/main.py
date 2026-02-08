@@ -100,9 +100,10 @@ def _default_data():
 
 
 def _github_headers():
-    print("[GitHub] Retrieving authentication token...")
+    # print("[GitHub] Retrieving authentication token...")
     try:
         token = st.secrets.get("GITHUB_TOKEN")
+        
     except Exception:
         token = None
     if not token:
@@ -150,6 +151,7 @@ def load_data():
         return _default_data()
 
     payload = response.json()
+    st.session_state.last_loaded_sha = payload.get("sha")
     content_b64 = payload.get("content", "")
     if not content_b64:
         return _default_data()
@@ -240,7 +242,8 @@ def save_data(data):
         return False
 
     if put_response.ok:
-        print("[GitHub] save_data succeeded")
+        new_sha = put_response.json().get("content", {}).get("sha")
+        print(f"[GitHub] save_data succeeded, new sha: {new_sha}")
         return True
 
     if put_response.status_code in (409, 422):
@@ -273,6 +276,8 @@ def save_data(data):
         if not put_response.ok:
             _log_github_error("PUT (retry)", put_response)
             return False
+        new_sha = put_response.json().get("content", {}).get("sha")
+        print(f"[GitHub] save_data succeeded, new sha: {new_sha}")
         return True
 
     _log_github_error("PUT", put_response)
@@ -314,18 +319,16 @@ def calculate_revision_dates(study_date_str, exam_date_str, difficulty):
 
 
 def get_todays_revisions(data, person):
-    """Get all revisions due today for a person"""
+    """Get all revisions due today for a person."""
     today = datetime.now().date()
     todays_revisions = []
-    
+
     for lecture_id, lecture in data["lectures"].items():
         for stage, date_str in lecture["revision_dates"].items():
             revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-            
-            # Check if this revision is due today
             grade_key = f"{lecture_id}_{stage}"
             grade = data["persons"][person]["grades"].get(grade_key)
-            
+
             if not grade and revision_date == today:
                 todays_revisions.append({
                     "lecture_id": lecture_id,
@@ -333,38 +336,31 @@ def get_todays_revisions(data, person):
                     "stage": stage,
                     "date": format_date_for_display(date_str),
                     "difficulty": lecture["difficulty"],
-                    "category": lecture["category"]
+                    "category": lecture["category"],
+                    "date_str": date_str
                 })
-    
-    # Add emergency revisions due today
-    for emergency_id, emergency in data["persons"][person].get("emergency_revisions", {}).items():
-        emergency_date = datetime.strptime(emergency["date"], "%Y-%m-%d").date()
-        if not emergency.get("completed") and emergency_date == today:
-            todays_revisions.append({
-                "lecture_id": emergency["lecture_id"],
-                "lecture_name": emergency["lecture_name"],
-                "stage": "EMERGENCY",
-                "date": format_date_for_display(emergency["date"]),
-                "difficulty": emergency.get("difficulty", 3),
-                "category": emergency.get("category", ""),
-                "emergency_id": emergency_id
-            })
-    
+
+    stage_order = {"R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
+    todays_revisions.sort(
+        key=lambda x: (
+            stage_order.get(x["stage"], 9),
+            x["lecture_name"]
+        )
+    )
     return todays_revisions
 
 
 def get_missed_revisions(data, person):
-    """Get all missed revisions (date < today with no grade)"""
+    """Get all missed revisions (date < today with no grade)."""
     today = datetime.now().date()
     missed_revisions = []
-    
+
     for lecture_id, lecture in data["lectures"].items():
         for stage, date_str in lecture["revision_dates"].items():
             revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-            
             grade_key = f"{lecture_id}_{stage}"
             grade = data["persons"][person]["grades"].get(grade_key)
-            
+
             if not grade and revision_date < today:
                 overdue_days = (today - revision_date).days
                 missed_revisions.append({
@@ -374,304 +370,44 @@ def get_missed_revisions(data, person):
                     "date": format_date_for_display(date_str),
                     "overdue_days": overdue_days,
                     "difficulty": lecture["difficulty"],
-                    "category": lecture["category"]
+                    "category": lecture["category"],
+                    "date_str": date_str
                 })
-    
-    # Sort by stage first (EMERGENCY, R1-R7), then by overdue days
-    stage_order = {"EMERGENCY": 0, "R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
-    missed_revisions.sort(key=lambda x: (stage_order.get(x["stage"], 9), -x["overdue_days"]))
+
+    stage_order = {"R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
+    missed_revisions.sort(
+        key=lambda x: (
+            -x["overdue_days"],
+            stage_order.get(x["stage"], 9),
+            x["lecture_name"]
+        )
+    )
     return missed_revisions
 
 
-def _revision_load(difficulty):
-    if difficulty <= 2:
-        return 1
-    if difficulty == 3:
-        return 2
-    return 3
+def grade_revision(data, person, lecture_id, stage, grade):
+    """Grade a revision for a person."""
+    st.session_state.last_graded_key = f"{lecture_id}_{stage}"
+    st.session_state.last_graded_person = person
 
-
-def _get_revision_date_str(data, person, rev):
-    if rev.get("stage") == "EMERGENCY":
-        emergency_id = rev.get("emergency_id")
-        if emergency_id:
-            emergency = data["persons"][person].get("emergency_revisions", {}).get(emergency_id)
-            if emergency:
-                return emergency.get("date")
-        return None
-    lecture = data["lectures"].get(rev.get("lecture_id"), {})
-    return lecture.get("revision_dates", {}).get(rev.get("stage"))
-
-
-def _revision_key(rev):
-    if rev.get("stage") == "EMERGENCY" and rev.get("emergency_id"):
-        return f"emergency:{rev['emergency_id']}"
-    return f"{rev.get('lecture_id')}:{rev.get('stage')}"
-
-
-def _collect_pending_revisions_window(data, person, start_date, end_date):
-    pending = []
-
-    for lecture_id, lecture in data["lectures"].items():
-        for stage, date_str in lecture["revision_dates"].items():
-            revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-            if revision_date < start_date or revision_date > end_date:
-                continue
-            grade_key = f"{lecture_id}_{stage}"
-            grade = data["persons"][person]["grades"].get(grade_key)
-            if grade:
-                continue
-            pending.append({
-                "lecture_id": lecture_id,
-                "lecture_name": lecture["name"],
-                "stage": stage,
-                "date": format_date_for_display(date_str),
-                "difficulty": lecture["difficulty"],
-                "category": lecture["category"],
-                "date_str": date_str,
-                "moved_by_dlb": False
-            })
-
-    for emergency_id, emergency in data["persons"][person].get("emergency_revisions", {}).items():
-        if emergency.get("completed"):
-            continue
-        emergency_date = datetime.strptime(emergency["date"], "%Y-%m-%d").date()
-        if emergency_date < start_date or emergency_date > end_date:
-            continue
-        pending.append({
-            "lecture_id": emergency["lecture_id"],
-            "lecture_name": emergency["lecture_name"],
-            "stage": "EMERGENCY",
-            "date": format_date_for_display(emergency["date"]),
-            "difficulty": emergency.get("difficulty", 3),
-            "category": emergency.get("category", ""),
-            "emergency_id": emergency_id,
-            "date_str": emergency["date"],
-            "moved_by_dlb": False
-        })
-
-    return pending
-
-
-def apply_daily_load_balancing(data, person, todays_revisions):
-    """Post-process today's revisions to smooth daily load without altering schedules."""
-    today = datetime.now().date()
-    today_str = format_date_for_storage(today)
-
-    if st.session_state.get("last_save_ok") is not True:
-        st.session_state.dlb_plan = {}
-        return todays_revisions
-
-    if "dlb_plan" not in st.session_state:
-        st.session_state.dlb_plan = {}
-
-    plan_key = f"{person}:{today_str}"
-    current_keys = {_revision_key(r) for r in todays_revisions}
-    plan = st.session_state.dlb_plan.get(plan_key)
-
-    if plan:
-        source_keys = plan.get("source_keys", set())
-        hidden_for_day = plan.get("hidden_keys", set())
-        if current_keys.issubset(source_keys) and current_keys.isdisjoint(hidden_for_day):
-            return [r for r in todays_revisions if _revision_key(r) not in hidden_for_day]
-
-    hidden_for_day = set()
-
-    adjusted = []
-    for rev in todays_revisions:
-        date_str = _get_revision_date_str(data, person, rev)
-        rev_copy = dict(rev)
-        rev_copy["date_str"] = date_str
-        rev_copy["moved_by_dlb"] = False
-        adjusted.append(rev_copy)
-
-    def load_of_list(items):
-        return sum(_revision_load(item.get("difficulty", 3)) for item in items)
-
-    def days_to_exam(date_str):
-        if not date_str or not data.get("exam_date"):
-            return 0
-        exam_date = datetime.strptime(data["exam_date"], "%Y-%m-%d").date()
-        revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        return (exam_date - revision_date).days
-
-    # D5 — High Difficulty Spread
-    high_diff = [r for r in adjusted if r.get("difficulty", 3) >= 4 and not r.get("moved_by_dlb")]
-    if len(high_diff) > 2:
-        high_diff.sort(key=lambda r: (
-            r.get("difficulty", 3),
-            -days_to_exam(r.get("date_str")),
-            r.get("lecture_name", "")
-        ))
-        extras = high_diff[2:]
-        for extra in extras:
-            extra["moved_by_dlb"] = True
-            hidden_for_day.add(_revision_key(extra))
-            adjusted.remove(extra)
-
-    # D4 — Overload Smoothing
-    missed_exists = len(get_missed_revisions(data, person)) > 0
-    target_threshold = 9 if missed_exists else 7
-
-    def push_candidate(items):
-        candidates = [
-            r for r in items
-            if not r.get("moved_by_dlb") and r.get("stage") != "EMERGENCY"
-        ]
-        if not candidates:
-            return None
-        candidates.sort(key=lambda r: (
-            r.get("difficulty", 3),
-            -days_to_exam(r.get("date_str")),
-            r.get("lecture_name", "")
-        ))
-        return candidates[0]
-
-    while load_of_list(adjusted) > target_threshold:
-        candidate = push_candidate(adjusted)
-        if not candidate:
-            break
-        candidate["moved_by_dlb"] = True
-        hidden_for_day.add(_revision_key(candidate))
-        adjusted.remove(candidate)
-
-    # D3 — No-Zero Rule
-    if load_of_list(adjusted) == 0:
-        window_start = today + timedelta(days=1)
-        window_end = today + timedelta(days=3)
-        future_pending = _collect_pending_revisions_window(data, person, window_start, window_end)
-
-        if future_pending:
-            non_hard = [r for r in future_pending if r.get("difficulty", 3) < 5]
-            candidates = non_hard if non_hard else future_pending
-            candidates.sort(key=lambda r: (
-                datetime.strptime(r["date_str"], "%Y-%m-%d").date(),
-                r.get("difficulty", 3),
-                r.get("lecture_name", "")
-            ))
-            pulled = candidates[0]
-            pulled["moved_by_dlb"] = True
-            pulled["date"] = format_date_for_display(format_date_for_storage(today))
-            pulled["date_str"] = format_date_for_storage(today)
-            adjusted.append(pulled)
-
-    st.session_state.dlb_plan[plan_key] = {
-        "source_keys": current_keys,
-        "hidden_keys": hidden_for_day
-    }
-
-    return adjusted
-
-
-def calculate_risk_score(data, person, lecture_id):
-    """Calculate risk score based on grading history"""
-    risk = 0
-    grades = data["persons"][person]["grades"]
-    
-    for stage in REVISION_RATIOS.keys():
-        grade_key = f"{lecture_id}_{stage}"
-        grade = grades.get(grade_key)
-        
-        if grade == "FAIL":
-            risk += 3
-        elif grade == "SKIP":
-            risk += 2  # SKIP is soft failure
-        elif grade == "PARTIAL":
-            risk += 0.5
-        elif grade == "PERFECT":
-            risk -= 1
-    
-    return max(0, risk)  # Risk cannot be negative
-
-
-def check_emergency_revision_needed(data, person, lecture_id):
-    """Check if emergency revision should be injected"""
-    grades = data["persons"][person]["grades"]
-    lecture = data["lectures"][lecture_id]
-    
-    # Count recent failures/skips
-    fail_count = 0
-    skip_count = 0
-    
-    for stage in REVISION_RATIOS.keys():
-        grade_key = f"{lecture_id}_{stage}"
-        grade = grades.get(grade_key)
-        
-        if grade == "FAIL":
-            fail_count += 1
-        elif grade == "SKIP":
-            skip_count += 1
-    
-    # Inject emergency if 2+ FAILs or 2+ SKIPs
-    if fail_count >= 2 or skip_count >= 2:
-        # Create emergency revision for tomorrow
-        tomorrow = format_date_for_storage(datetime.now() + timedelta(days=1))
-        emergency_id = f"{lecture_id}_emergency_{datetime.now().timestamp()}"
-        
-        data["persons"][person]["emergency_revisions"][emergency_id] = {
-            "lecture_id": lecture_id,
-            "lecture_name": lecture["name"],
-            "date": tomorrow,
-            "difficulty": lecture["difficulty"],
-            "category": lecture["category"],
-            "completed": False,
-            "reason": f"Repeated failures (FAIL: {fail_count}, SKIP: {skip_count})"
-        }
-        
-        save_data(data)
-        return True
-    
-    return False
-
-
-def grade_revision(data, person, lecture_id, stage, grade, is_emergency=False, emergency_id=None):
-    """Grade a revision for a person"""
-    st.session_state.last_save_ok = False
-    if is_emergency:
-        data["persons"][person]["emergency_revisions"][emergency_id]["completed"] = True
-        data["persons"][person]["emergency_revisions"][emergency_id]["grade"] = grade
-    else:
-        grade_key = f"{lecture_id}_{stage}"
-        data["persons"][person]["grades"][grade_key] = grade
+    grade_key = f"{lecture_id}_{stage}"
+    data["persons"][person]["grades"][grade_key] = grade
 
     save_ok = save_data(data)
     if not save_ok:
         fresh_data = load_data()
-        if is_emergency:
-            emergency = fresh_data["persons"][person]["emergency_revisions"].get(emergency_id)
-            if emergency:
-                emergency["completed"] = True
-                emergency["grade"] = grade
-        else:
-            grade_key = f"{lecture_id}_{stage}"
-            fresh_data["persons"][person]["grades"][grade_key] = grade
+        fresh_data["persons"][person]["grades"][grade_key] = grade
         save_ok = save_data(fresh_data)
 
     verified = False
     if save_ok:
-        for attempt in range(3):
+        for _ in range(3):
             verify_data = load_data()
-            if is_emergency:
-                emergency = verify_data["persons"][person]["emergency_revisions"].get(emergency_id)
-                verified = bool(emergency and emergency.get("completed") and emergency.get("grade") == grade)
-            else:
-                grade_key = f"{lecture_id}_{stage}"
-                verified = verify_data["persons"][person]["grades"].get(grade_key) == grade
+            verified = verify_data["persons"][person]["grades"].get(grade_key) == grade
             if verified:
                 break
             time.sleep(0.4)
     print(f"[GitHub] grade verify: {verified}")
-    st.session_state.last_save_ok = verified
-
-    # Clear DLB plan so the next render reflects actual persisted state.
-    today_str = format_date_for_storage(datetime.now().date())
-    plan_key = f"{person}:{today_str}"
-    if "dlb_plan" in st.session_state:
-        st.session_state.dlb_plan.pop(plan_key, None)
-    
-    # Check if emergency revision is needed after grading
-    if grade in ["FAIL", "SKIP"]:
-        check_emergency_revision_needed(data, person, lecture_id)
 
 
 def reflow_revisions(data, lecture_id):
@@ -739,18 +475,12 @@ def view_home():
             st.rerun()
     
     st.subheader(f"Revisions for {st.session_state.current_person}")
-    
-    # Today's revisions
+
     todays = get_todays_revisions(data, st.session_state.current_person)
-    todays = apply_daily_load_balancing(data, st.session_state.current_person, todays)
-    
-    # Sort by stage: EMERGENCY first, then R1, R2, R3, R4, R5, R6, R7
-    stage_order = {"EMERGENCY": 0, "R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
-    todays.sort(key=lambda x: stage_order.get(x["stage"], 9))
-    
+
     if todays:
         st.write(f"**{len(todays)} revision(s) due today:**")
-        
+
         for idx, rev in enumerate(todays):
             with st.container():
                 st.markdown(f"### {rev['lecture_name']}")
@@ -761,78 +491,145 @@ def view_home():
                     st.write(f"**Category:** {rev['category']}")
                     st.write(f"**Difficulty:** {rev['difficulty']}/5")
                 
-                is_emergency = rev["stage"] == "EMERGENCY"
-                emergency_id = rev.get("emergency_id")
-                
+                button_key_base = f"today_{rev['lecture_id']}_{rev['stage']}"
+
                 with col2:
-                    if st.button("❌ FAIL", key=f"fail_{idx}", use_container_width=True):
-                        grade_revision(data, st.session_state.current_person, 
-                                     rev['lecture_id'], rev['stage'], "FAIL",
-                                     is_emergency, emergency_id)
-                        st.rerun()
+                    st.button(
+                        "❌ FAIL",
+                        key=f"fail_{button_key_base}",
+                        use_container_width=True,
+                        on_click=grade_revision,
+                        args=(
+                            data,
+                            st.session_state.current_person,
+                            rev["lecture_id"],
+                            rev["stage"],
+                            "FAIL"
+                        )
+                    )
                 
                 with col3:
-                    if st.button("⚠️ PARTIAL", key=f"partial_{idx}", use_container_width=True):
-                        grade_revision(data, st.session_state.current_person,
-                                     rev['lecture_id'], rev['stage'], "PARTIAL",
-                                     is_emergency, emergency_id)
-                        st.rerun()
+                    st.button(
+                        "⚠️ PARTIAL",
+                        key=f"partial_{button_key_base}",
+                        use_container_width=True,
+                        on_click=grade_revision,
+                        args=(
+                            data,
+                            st.session_state.current_person,
+                            rev["lecture_id"],
+                            rev["stage"],
+                            "PARTIAL"
+                        )
+                    )
                 
                 with col4:
-                    if st.button("✅ PERFECT", key=f"perfect_{idx}", use_container_width=True):
-                        grade_revision(data, st.session_state.current_person,
-                                     rev['lecture_id'], rev['stage'], "PERFECT",
-                                     is_emergency, emergency_id)
-                        st.rerun()
+                    st.button(
+                        "✅ PERFECT",
+                        key=f"perfect_{button_key_base}",
+                        use_container_width=True,
+                        on_click=grade_revision,
+                        args=(
+                            data,
+                            st.session_state.current_person,
+                            rev["lecture_id"],
+                            rev["stage"],
+                            "PERFECT"
+                        )
+                    )
                 
                 with col5:
-                    if st.button("⏭️ SKIP", key=f"skip_{idx}", use_container_width=True):
-                        grade_revision(data, st.session_state.current_person,
-                                     rev['lecture_id'], rev['stage'], "SKIP",
-                                     is_emergency, emergency_id)
-                        st.rerun()
+                    st.button(
+                        "⏭️ SKIP",
+                        key=f"skip_{button_key_base}",
+                        use_container_width=True,
+                        on_click=grade_revision,
+                        args=(
+                            data,
+                            st.session_state.current_person,
+                            rev["lecture_id"],
+                            rev["stage"],
+                            "SKIP"
+                        )
+                    )
                 
                 st.divider()
     else:
         st.info("🎉 No revisions due today! Well done!")
-    
-    # Missed revisions
+
     missed = get_missed_revisions(data, st.session_state.current_person)
-    
+
     if missed:
         st.warning(f"⚠️ **{len(missed)} missed revision(s):**")
-        
+
         for idx, rev in enumerate(missed):
             with st.expander(f"{rev['lecture_name']} - {rev['stage']} ({rev['overdue_days']} days overdue)"):
                 col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
-                
+
                 with col1:
                     st.write(f"**Due Date:** {rev['date']}")
                     st.write(f"**Category:** {rev['category']}")
-                
+
+                missed_key_base = f"missed_{rev['lecture_id']}_{rev['stage']}"
                 with col2:
-                    if st.button("❌ FAIL", key=f"missed_fail_{idx}", use_container_width=True):
-                        grade_revision(data, st.session_state.current_person,
-                                     rev['lecture_id'], rev['stage'], "FAIL")
-                        st.rerun()
-                
+                    st.button(
+                        "❌ FAIL",
+                        key=f"missed_fail_{missed_key_base}",
+                        use_container_width=True,
+                        on_click=grade_revision,
+                        args=(
+                            data,
+                            st.session_state.current_person,
+                            rev["lecture_id"],
+                            rev["stage"],
+                            "FAIL"
+                        )
+                    )
+
                 with col3:
-                    if st.button("⚠️ PARTIAL", key=f"missed_partial_{idx}", use_container_width=True):
-                        grade_revision(data, st.session_state.current_person,
-                                     rev['lecture_id'], rev['stage'], "PARTIAL")
-                        st.rerun()
-                
+                    st.button(
+                        "⚠️ PARTIAL",
+                        key=f"missed_partial_{missed_key_base}",
+                        use_container_width=True,
+                        on_click=grade_revision,
+                        args=(
+                            data,
+                            st.session_state.current_person,
+                            rev["lecture_id"],
+                            rev["stage"],
+                            "PARTIAL"
+                        )
+                    )
+
                 with col4:
-                    if st.button("✅ PERFECT", key=f"missed_perfect_{idx}", use_container_width=True):
-                        grade_revision(data, st.session_state.current_person,
-                                     rev['lecture_id'], rev['stage'], "PERFECT")
-                        st.rerun()
-                
+                    st.button(
+                        "✅ PERFECT",
+                        key=f"missed_perfect_{missed_key_base}",
+                        use_container_width=True,
+                        on_click=grade_revision,
+                        args=(
+                            data,
+                            st.session_state.current_person,
+                            rev["lecture_id"],
+                            rev["stage"],
+                            "PERFECT"
+                        )
+                    )
+
                 with col5:
-                    if st.button("⏭️ SKIP", key=f"missed_skip_{idx}", use_container_width=True):
-                        grade_revision(data, st.session_state.current_person,
-                                     rev['lecture_id'], rev['stage'], "SKIP")
-                        st.rerun()
+                    st.button(
+                        "⏭️ SKIP",
+                        key=f"missed_skip_{missed_key_base}",
+                        use_container_width=True,
+                        on_click=grade_revision,
+                        args=(
+                            data,
+                            st.session_state.current_person,
+                            rev["lecture_id"],
+                            rev["stage"],
+                            "SKIP"
+                        )
+                    )
 
 
 # =======================
@@ -983,9 +780,6 @@ def view_revision_plan():
                                                             key=f"cat_{lecture_id}")
                             
                             with col3:
-                                risk = calculate_risk_score(data, st.session_state.current_person, lecture_id)
-                                st.metric("Risk Score", risk)
-                                
                                 col_save, col_delete = st.columns(2)
                                 with col_save:
                                     save_changes = st.form_submit_button("💾 Save", use_container_width=True)
