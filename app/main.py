@@ -99,10 +99,13 @@ def _default_data():
 
 
 def _github_headers():
+    print("[GitHub] Retrieving authentication token...")
     try:
         token = st.secrets.get("GITHUB_TOKEN")
     except Exception:
         token = None
+    if not token:
+        token = os.getenv("GITHUB_TOKEN")
     if not token:
         print("[GitHub] Missing GITHUB_TOKEN in Streamlit secrets.")
         return None
@@ -154,14 +157,14 @@ def load_data():
         data = json.loads(decoded)
     except (ValueError, json.JSONDecodeError):
         return _default_data()
-    
+
     # Migrate legacy schema if needed
     if "persons" not in data:
         data["persons"] = {
             "Harsh": {"grades": {}, "emergency_revisions": {}},
             "Divya": {"grades": {}, "emergency_revisions": {}}
         }
-    
+
     for person in PERSONS:
         if person not in data["persons"]:
             data["persons"][person] = {"grades": {}, "emergency_revisions": {}}
@@ -169,15 +172,17 @@ def load_data():
             data["persons"][person]["grades"] = {}
         if "emergency_revisions" not in data["persons"][person]:
             data["persons"][person]["emergency_revisions"] = {}
-    
+
     return data
 
 
 def save_data(data):
     """Save data to GitHub JSON file"""
+    print("[GitHub] save_data called")
     headers = _github_headers()
     if not headers:
-        return
+        print("[GitHub] save_data aborted: missing auth header")
+        return False
 
     json_string = json.dumps(data, indent=2)
 
@@ -189,7 +194,7 @@ def save_data(data):
             timeout=10
         )
     except requests.RequestException:
-        return
+        return False
 
     sha = None
     if get_response.ok:
@@ -200,12 +205,13 @@ def save_data(data):
             try:
                 existing_decoded = base64.b64decode(existing_content).decode("utf-8")
                 if existing_decoded == json_string:
-                    return
+                    print("[GitHub] save_data skipped: no changes")
+                    return True
             except (ValueError, json.JSONDecodeError):
                 pass
     elif get_response.status_code != 404:
         _log_github_error("GET (sha)", get_response)
-        return
+        return False
 
     content_b64 = base64.b64encode(json_string.encode("utf-8")).decode("utf-8")
     payload = {
@@ -229,10 +235,11 @@ def save_data(data):
 
     put_response = _put_with_payload(payload)
     if put_response is None:
-        return
+        return False
 
     if put_response.ok:
-        return
+        print("[GitHub] save_data succeeded")
+        return True
 
     if put_response.status_code in (409, 422):
         try:
@@ -244,62 +251,63 @@ def save_data(data):
             )
         except requests.RequestException:
             _log_github_error("PUT", put_response)
-            return
+            return False
 
         if not retry_get.ok:
             _log_github_error("GET (retry)", retry_get)
             _log_github_error("PUT", put_response)
-            return
+            return False
 
         retry_payload = retry_get.json()
         retry_sha = retry_payload.get("sha")
         if not retry_sha:
             _log_github_error("PUT", put_response)
-            return
+            return False
 
         payload["sha"] = retry_sha
         put_response = _put_with_payload(payload)
         if put_response is None:
-            return
+            return False
         if not put_response.ok:
             _log_github_error("PUT (retry)", put_response)
-        return
+            return False
+        return True
 
     _log_github_error("PUT", put_response)
-    return
+    return False
 
 
 def calculate_revision_dates(study_date_str, exam_date_str, difficulty):
     """Calculate R1-R7 dates based on ratios and difficulty"""
     if not exam_date_str:
         return {}
-    
+
     study_date = datetime.strptime(study_date_str, "%Y-%m-%d")
     exam_date = datetime.strptime(exam_date_str, "%Y-%m-%d")
-    
+
     T = (exam_date - study_date).days
-    
+
     if T <= 0:
         return {}
-    
+
     # Difficulty tightens/loosens gaps (1=loose, 5=tight)
     # Higher difficulty means more frequent revisions (smaller multiplier)
     difficulty_factor = 1.0 + (3 - difficulty) * 0.15
-    
+
     revision_dates = {}
     stages_created = 0
-    
+
     for stage, ratio in REVISION_RATIOS.items():
         days_offset = int(T * ratio * difficulty_factor)
         revision_date = study_date + timedelta(days=days_offset)
-        
+
         # Hard ceiling: no revision may exceed exam date
         if revision_date > exam_date:
             break
-        
+
         revision_dates[stage] = format_date_for_storage(revision_date)
         stages_created += 1
-    
+
     return revision_dates
 
 
@@ -448,6 +456,10 @@ def apply_daily_load_balancing(data, person, todays_revisions):
     today = datetime.now().date()
     today_str = format_date_for_storage(today)
 
+    if st.session_state.get("last_save_ok") is not True:
+        st.session_state.dlb_plan = {}
+        return todays_revisions
+
     if "dlb_plan" not in st.session_state:
         st.session_state.dlb_plan = {}
 
@@ -455,9 +467,11 @@ def apply_daily_load_balancing(data, person, todays_revisions):
     current_keys = {_revision_key(r) for r in todays_revisions}
     plan = st.session_state.dlb_plan.get(plan_key)
 
-    if plan and not (current_keys - plan.get("source_keys", set())):
+    if plan:
+        source_keys = plan.get("source_keys", set())
         hidden_for_day = plan.get("hidden_keys", set())
-        return [r for r in todays_revisions if _revision_key(r) not in hidden_for_day]
+        if current_keys.issubset(source_keys) and current_keys.isdisjoint(hidden_for_day):
+            return [r for r in todays_revisions if _revision_key(r) not in hidden_for_day]
 
     hidden_for_day = set()
 
@@ -610,14 +624,43 @@ def check_emergency_revision_needed(data, person, lecture_id):
 
 def grade_revision(data, person, lecture_id, stage, grade, is_emergency=False, emergency_id=None):
     """Grade a revision for a person"""
+    st.session_state.last_save_ok = False
     if is_emergency:
         data["persons"][person]["emergency_revisions"][emergency_id]["completed"] = True
         data["persons"][person]["emergency_revisions"][emergency_id]["grade"] = grade
     else:
         grade_key = f"{lecture_id}_{stage}"
         data["persons"][person]["grades"][grade_key] = grade
-    
-    save_data(data)
+
+    save_ok = save_data(data)
+    if not save_ok:
+        fresh_data = load_data()
+        if is_emergency:
+            emergency = fresh_data["persons"][person]["emergency_revisions"].get(emergency_id)
+            if emergency:
+                emergency["completed"] = True
+                emergency["grade"] = grade
+        else:
+            grade_key = f"{lecture_id}_{stage}"
+            fresh_data["persons"][person]["grades"][grade_key] = grade
+        save_ok = save_data(fresh_data)
+
+    verified = False
+    if save_ok:
+        verify_data = load_data()
+        if is_emergency:
+            emergency = verify_data["persons"][person]["emergency_revisions"].get(emergency_id)
+            verified = bool(emergency and emergency.get("completed") and emergency.get("grade") == grade)
+        else:
+            grade_key = f"{lecture_id}_{stage}"
+            verified = verify_data["persons"][person]["grades"].get(grade_key) == grade
+    st.session_state.last_save_ok = verified
+
+    # Clear DLB plan so the next render reflects actual persisted state.
+    today_str = format_date_for_storage(datetime.now().date())
+    plan_key = f"{person}:{today_str}"
+    if "dlb_plan" in st.session_state:
+        st.session_state.dlb_plan.pop(plan_key, None)
     
     # Check if emergency revision is needed after grading
     if grade in ["FAIL", "SKIP"]:
