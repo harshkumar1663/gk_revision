@@ -216,19 +216,57 @@ def save_data(data):
     if sha:
         payload["sha"] = sha
 
-    try:
-        put_response = requests.put(
-            GITHUB_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=10
-        )
-    except requests.RequestException:
+    def _put_with_payload(payload_to_send):
+        try:
+            return requests.put(
+                GITHUB_API_URL,
+                headers=headers,
+                json=payload_to_send,
+                timeout=10
+            )
+        except requests.RequestException:
+            return None
+
+    put_response = _put_with_payload(payload)
+    if put_response is None:
         return
 
-    if not put_response.ok:
-        _log_github_error("PUT", put_response)
+    if put_response.ok:
         return
+
+    if put_response.status_code in (409, 422):
+        try:
+            retry_get = requests.get(
+                GITHUB_API_URL,
+                headers=headers,
+                params={"ref": GITHUB_BRANCH},
+                timeout=10
+            )
+        except requests.RequestException:
+            _log_github_error("PUT", put_response)
+            return
+
+        if not retry_get.ok:
+            _log_github_error("GET (retry)", retry_get)
+            _log_github_error("PUT", put_response)
+            return
+
+        retry_payload = retry_get.json()
+        retry_sha = retry_payload.get("sha")
+        if not retry_sha:
+            _log_github_error("PUT", put_response)
+            return
+
+        payload["sha"] = retry_sha
+        put_response = _put_with_payload(payload)
+        if put_response is None:
+            return
+        if not put_response.ok:
+            _log_github_error("PUT (retry)", put_response)
+        return
+
+    _log_github_error("PUT", put_response)
+    return
 
 
 def calculate_revision_dates(study_date_str, exam_date_str, difficulty):
