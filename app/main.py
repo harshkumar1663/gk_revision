@@ -410,14 +410,21 @@ def apply_daily_load_balancing(data, person, todays_revisions):
     today = datetime.now().date()
     today_str = format_date_for_storage(today)
 
-    if "dlb_hidden" not in st.session_state:
-        st.session_state.dlb_hidden = {}
-    hidden_for_day = st.session_state.dlb_hidden.get(today_str, set())
+    if "dlb_plan" not in st.session_state:
+        st.session_state.dlb_plan = {}
+
+    plan_key = f"{person}:{today_str}"
+    current_keys = {_revision_key(r) for r in todays_revisions}
+    plan = st.session_state.dlb_plan.get(plan_key)
+
+    if plan and not (current_keys - plan.get("source_keys", set())):
+        hidden_for_day = plan.get("hidden_keys", set())
+        return [r for r in todays_revisions if _revision_key(r) not in hidden_for_day]
+
+    hidden_for_day = set()
 
     adjusted = []
     for rev in todays_revisions:
-        if _revision_key(rev) in hidden_for_day:
-            continue
         date_str = _get_revision_date_str(data, person, rev)
         rev_copy = dict(rev)
         rev_copy["date_str"] = date_str
@@ -494,8 +501,10 @@ def apply_daily_load_balancing(data, person, todays_revisions):
             pulled["date_str"] = format_date_for_storage(today)
             adjusted.append(pulled)
 
-    if hidden_for_day:
-        st.session_state.dlb_hidden[today_str] = hidden_for_day
+    st.session_state.dlb_plan[plan_key] = {
+        "source_keys": current_keys,
+        "hidden_keys": hidden_for_day
+    }
 
     return adjusted
 
