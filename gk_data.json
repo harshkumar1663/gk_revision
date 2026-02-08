@@ -1,13 +1,416 @@
 {
-  "exam_date": "2026-05-20",
-  "lectures": {},
+  "exam_date": "2026-05-25",
+  "lectures": {
+    "lecture_1770369800.781428": {
+      "name": "Soil",
+      "study_date": "2026-02-03",
+      "difficulty": 1,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-02-07",
+        "R2": "2026-02-14",
+        "R3": "2026-02-26",
+        "R4": "2026-03-18",
+        "R5": "2026-04-16",
+        "R6": "2026-05-22"
+      }
+    },
+    "lecture_1770369817.111431": {
+      "name": "Forests and Grasslands",
+      "study_date": "2026-01-31",
+      "difficulty": 2,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-02-03",
+        "R2": "2026-02-10",
+        "R3": "2026-02-20",
+        "R4": "2026-03-11",
+        "R5": "2026-04-06",
+        "R6": "2026-05-09"
+      }
+    },
+    "lecture_1770369828.403878": {
+      "name": "Monsoon",
+      "study_date": "2026-01-30",
+      "difficulty": 2,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-02-02",
+        "R2": "2026-02-09",
+        "R3": "2026-02-20",
+        "R4": "2026-03-10",
+        "R5": "2026-04-06",
+        "R6": "2026-05-09"
+      }
+    },
+    "lecture_1770369851.825448": {
+      "name": "Peninsular River System",
+      "study_date": "2026-01-14",
+      "difficulty": 3,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-17",
+        "R2": "2026-01-24",
+        "R3": "2026-02-03",
+        "R4": "2026-02-22",
+        "R5": "2026-03-20",
+        "R6": "2026-04-22",
+        "R7": "2026-05-11"
+      }
+    },
+    "lecture_1770369868.764211": {
+      "name": "Himalayan River System",
+      "study_date": "2026-01-13",
+      "difficulty": 3,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-16",
+        "R2": "2026-01-23",
+        "R3": "2026-02-03",
+        "R4": "2026-02-21",
+        "R5": "2026-03-20",
+        "R6": "2026-04-22",
+        "R7": "2026-05-11"
+      }
+    },
+    "lecture_1770369885.810849": {
+      "name": "Plains and Islands",
+      "study_date": "2026-01-12",
+      "difficulty": 2,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-16",
+        "R2": "2026-01-24",
+        "R3": "2026-02-05",
+        "R4": "2026-02-26",
+        "R5": "2026-03-29",
+        "R6": "2026-05-06"
+      }
+    },
+    "lecture_1770369900.07285": {
+      "name": "Peninsular Plateau",
+      "study_date": "2026-01-11",
+      "difficulty": 2,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-15",
+        "R2": "2026-01-23",
+        "R3": "2026-02-04",
+        "R4": "2026-02-26",
+        "R5": "2026-03-29",
+        "R6": "2026-05-06"
+      }
+    },
+    "lecture_1770369918.003887": {
+      "name": "Himalayas",
+      "study_date": "2026-01-10",
+      "difficulty": 2,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-14",
+        "R2": "2026-01-22",
+        "R3": "2026-02-03",
+        "R4": "2026-02-25",
+        "R5": "2026-03-28",
+        "R6": "2026-05-06"
+      }
+    },
+    "lecture_1770369933.856904": {
+      "name": "India and its Location",
+      "study_date": "2026-01-09",
+      "difficulty": 3,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-13",
+        "R2": "2026-01-19",
+        "R3": "2026-01-30",
+        "R4": "2026-02-18",
+        "R5": "2026-03-18",
+        "R6": "2026-04-21",
+        "R7": "2026-05-11"
+      }
+    },
+    "lecture_1770369948.338959": {
+      "name": "Cyclone and Ocean Current",
+      "study_date": "2026-01-06",
+      "difficulty": 2,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-10",
+        "R2": "2026-01-18",
+        "R3": "2026-01-31",
+        "R4": "2026-02-22",
+        "R5": "2026-03-26",
+        "R6": "2026-05-05"
+      }
+    },
+    "lecture_1770369958.686869": {
+      "name": "Winds",
+      "study_date": "2026-01-05",
+      "difficulty": 2,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-09",
+        "R2": "2026-01-17",
+        "R3": "2026-01-30",
+        "R4": "2026-02-22",
+        "R5": "2026-03-26",
+        "R6": "2026-05-05"
+      }
+    },
+    "lecture_1770369977.187799": {
+      "name": "Condensation and Precipitation",
+      "study_date": "2026-01-04",
+      "difficulty": 1,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-09",
+        "R2": "2026-01-18",
+        "R3": "2026-02-02",
+        "R4": "2026-02-27",
+        "R5": "2026-04-05",
+        "R6": "2026-05-21"
+      }
+    },
+    "lecture_1770369991.525342": {
+      "name": "Atmosphere",
+      "study_date": "2026-01-03",
+      "difficulty": 1,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-08",
+        "R2": "2026-01-17",
+        "R3": "2026-02-01",
+        "R4": "2026-02-27",
+        "R5": "2026-04-05",
+        "R6": "2026-05-21"
+      }
+    },
+    "lecture_1770370003.52835": {
+      "name": "Landforms",
+      "study_date": "2026-01-02",
+      "difficulty": 1,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-07",
+        "R2": "2026-01-16",
+        "R3": "2026-01-31",
+        "R4": "2026-02-26",
+        "R5": "2026-04-04",
+        "R6": "2026-05-21"
+      }
+    },
+    "lecture_1770370014.919192": {
+      "name": "Geomorphic Process",
+      "study_date": "2026-01-01",
+      "difficulty": 1,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-06",
+        "R2": "2026-01-15",
+        "R3": "2026-01-30",
+        "R4": "2026-02-26",
+        "R5": "2026-04-04",
+        "R6": "2026-05-21"
+      }
+    },
+    "lecture_1770370028.933469": {
+      "name": "Rocks and Volcano",
+      "study_date": "2025-12-30",
+      "difficulty": 3,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-03",
+        "R2": "2026-01-10",
+        "R3": "2026-01-22",
+        "R4": "2026-02-11",
+        "R5": "2026-03-13",
+        "R6": "2026-04-18",
+        "R7": "2026-05-10"
+      }
+    },
+    "lecture_1770370043.658793": {
+      "name": "Continents and Oceans",
+      "study_date": "2025-12-29",
+      "difficulty": 1,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-03",
+        "R2": "2026-01-13",
+        "R3": "2026-01-28",
+        "R4": "2026-02-24",
+        "R5": "2026-04-03",
+        "R6": "2026-05-21"
+      }
+    },
+    "lecture_1770370067.275943": {
+      "name": "Earth Interior and Tectonics",
+      "study_date": "2025-12-28",
+      "difficulty": 1,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-02",
+        "R2": "2026-01-12",
+        "R3": "2026-01-27",
+        "R4": "2026-02-23",
+        "R5": "2026-04-03",
+        "R6": "2026-05-21"
+      }
+    },
+    "lecture_1770370080.968782": {
+      "name": "Latitude and Longitude",
+      "study_date": "2025-12-27",
+      "difficulty": 1,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-01-01",
+        "R2": "2026-01-11",
+        "R3": "2026-01-26",
+        "R4": "2026-02-23",
+        "R5": "2026-04-02",
+        "R6": "2026-05-21"
+      }
+    },
+    "lecture_1770370089.822968": {
+      "name": "Solar System",
+      "study_date": "2025-12-26",
+      "difficulty": 1,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2025-12-31",
+        "R2": "2026-01-10",
+        "R3": "2026-01-26",
+        "R4": "2026-02-22",
+        "R5": "2026-04-02",
+        "R6": "2026-05-21"
+      }
+    },
+    "lecture_1770536673.437108": {
+      "name": "Agriculture",
+      "study_date": "2026-02-05",
+      "difficulty": 1,
+      "category": "Geography",
+      "revision_dates": {
+        "R1": "2026-02-09",
+        "R2": "2026-02-16",
+        "R3": "2026-02-27",
+        "R4": "2026-03-19",
+        "R5": "2026-04-16",
+        "R6": "2026-05-22"
+      }
+    }
+  },
   "persons": {
     "Harsh": {
-      "grades": {},
+      "grades": {
+        "lecture_1770370089.822968_R1": "PERFECT",
+        "lecture_1770370080.968782_R1": "PERFECT",
+        "lecture_1770370067.275943_R1": "PERFECT",
+        "lecture_1770370028.933469_R1": "SKIP",
+        "lecture_1770370043.658793_R1": "PERFECT",
+        "lecture_1770370014.919192_R1": "PERFECT",
+        "lecture_1770370003.52835_R1": "PERFECT",
+        "lecture_1770369991.525342_R1": "SKIP",
+        "lecture_1770369958.686869_R1": "SKIP",
+        "lecture_1770369977.187799_R1": "PERFECT",
+        "lecture_1770369948.338959_R1": "SKIP",
+        "lecture_1770369933.856904_R1": "SKIP",
+        "lecture_1770369918.003887_R1": "PERFECT",
+        "lecture_1770369900.07285_R1": "SKIP",
+        "lecture_1770369868.764211_R1": "SKIP",
+        "lecture_1770369885.810849_R1": "SKIP",
+        "lecture_1770369851.825448_R1": "SKIP",
+        "lecture_1770369828.403878_R1": "PARTIAL",
+        "lecture_1770369817.111431_R1": "PARTIAL",
+        "lecture_1770370028.933469_R2": "PARTIAL",
+        "lecture_1770370080.968782_R2": "PERFECT",
+        "lecture_1770370089.822968_R2": "PERFECT",
+        "lecture_1770370067.275943_R2": "PERFECT",
+        "lecture_1770370043.658793_R2": "PERFECT",
+        "lecture_1770370014.919192_R2": "PERFECT",
+        "lecture_1770370003.52835_R2": "SKIP",
+        "lecture_1770369958.686869_R2": "PERFECT",
+        "lecture_1770369991.525342_R2": "PERFECT",
+        "lecture_1770369948.338959_R2": "PARTIAL",
+        "lecture_1770369977.187799_R2": "PERFECT",
+        "lecture_1770369933.856904_R2": "PARTIAL",
+        "lecture_1770369918.003887_R2": "PARTIAL",
+        "lecture_1770369900.07285_R2": "PARTIAL",
+        "lecture_1770369868.764211_R2": "PARTIAL",
+        "lecture_1770369885.810849_R2": "PARTIAL",
+        "lecture_1770369851.825448_R2": "PARTIAL",
+        "lecture_1770370028.933469_R3": "PERFECT",
+        "lecture_1770370080.968782_R3": "PERFECT",
+        "lecture_1770370089.822968_R3": "PERFECT",
+        "lecture_1770370067.275943_R3": "PERFECT",
+        "lecture_1770370043.658793_R3": "PERFECT",
+        "lecture_1770369933.856904_R3": "PERFECT",
+        "lecture_1770369958.686869_R3": "PERFECT",
+        "lecture_1770370014.919192_R3": "PERFECT",
+        "lecture_1770369948.338959_R3": "PERFECT",
+        "lecture_1770370003.52835_R3": "PERFECT",
+        "lecture_1770369991.525342_R3": "PERFECT",
+        "lecture_1770369977.187799_R3": "PERFECT",
+        "lecture_1770369868.764211_R3": "PARTIAL",
+        "lecture_1770369918.003887_R3": "PARTIAL"
+      },
       "emergency_revisions": {}
     },
     "Divya": {
-      "grades": {},
+      "grades": {
+        "lecture_1770370089.822968_R1": "PERFECT",
+        "lecture_1770370089.822968_R2": "PERFECT",
+        "lecture_1770370089.822968_R3": "PARTIAL",
+        "lecture_1770370080.968782_R1": "PERFECT",
+        "lecture_1770370080.968782_R2": "PARTIAL",
+        "lecture_1770370080.968782_R3": "PERFECT",
+        "lecture_1770370067.275943_R1": "PERFECT",
+        "lecture_1770370067.275943_R2": "PERFECT",
+        "lecture_1770370067.275943_R3": "PERFECT",
+        "lecture_1770370028.933469_R1": "SKIP",
+        "lecture_1770370043.658793_R1": "PERFECT",
+        "lecture_1770370043.658793_R2": "PERFECT",
+        "lecture_1770370043.658793_R3": "PERFECT",
+        "lecture_1770370014.919192_R1": "PERFECT",
+        "lecture_1770370014.919192_R2": "PERFECT",
+        "lecture_1770370014.919192_R3": "PERFECT",
+        "lecture_1770370003.52835_R3": "PERFECT",
+        "lecture_1770370003.52835_R2": "PERFECT",
+        "lecture_1770370003.52835_R1": "PERFECT",
+        "lecture_1770369991.525342_R1": "SKIP",
+        "lecture_1770369991.525342_R2": "PERFECT",
+        "lecture_1770369991.525342_R3": "PERFECT",
+        "lecture_1770369977.187799_R3": "PERFECT",
+        "lecture_1770369977.187799_R2": "PERFECT",
+        "lecture_1770369977.187799_R1": "PERFECT",
+        "lecture_1770369958.686869_R1": "SKIP",
+        "lecture_1770369958.686869_R2": "PARTIAL",
+        "lecture_1770369958.686869_R3": "PARTIAL",
+        "lecture_1770369948.338959_R3": "PERFECT",
+        "lecture_1770369948.338959_R1": "SKIP",
+        "lecture_1770369948.338959_R2": "PARTIAL",
+        "lecture_1770369933.856904_R2": "PERFECT",
+        "lecture_1770369933.856904_R1": "SKIP",
+        "lecture_1770369918.003887_R1": "PERFECT",
+        "lecture_1770369918.003887_R2": "PARTIAL",
+        "lecture_1770369918.003887_R3": "PERFECT",
+        "lecture_1770369900.07285_R3": "PERFECT",
+        "lecture_1770369900.07285_R2": "PARTIAL",
+        "lecture_1770369900.07285_R1": "SKIP",
+        "lecture_1770369885.810849_R1": "SKIP",
+        "lecture_1770369885.810849_R2": "PARTIAL",
+        "lecture_1770369885.810849_R3": "PERFECT",
+        "lecture_1770369868.764211_R1": "PERFECT",
+        "lecture_1770369868.764211_R2": "PERFECT",
+        "lecture_1770369851.825448_R1": "SKIP",
+        "lecture_1770369851.825448_R2": "PERFECT",
+        "lecture_1770369851.825448_R3": "PERFECT",
+        "lecture_1770369828.403878_R1": "PERFECT",
+        "lecture_1770369817.111431_R1": "PERFECT",
+        "lecture_1770369800.781428_R1": "PERFECT",
+        "lecture_1770369868.764211_R3": "PERFECT",
+        "lecture_1770369933.856904_R3": "PERFECT"
+      },
       "emergency_revisions": {}
     }
   }

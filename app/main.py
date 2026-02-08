@@ -355,6 +355,12 @@ def _get_revision_date_str(data, person, rev):
     return lecture.get("revision_dates", {}).get(rev.get("stage"))
 
 
+def _revision_key(rev):
+    if rev.get("stage") == "EMERGENCY" and rev.get("emergency_id"):
+        return f"emergency:{rev['emergency_id']}"
+    return f"{rev.get('lecture_id')}:{rev.get('stage')}"
+
+
 def _collect_pending_revisions_window(data, person, start_date, end_date):
     pending = []
 
@@ -402,9 +408,16 @@ def _collect_pending_revisions_window(data, person, start_date, end_date):
 def apply_daily_load_balancing(data, person, todays_revisions):
     """Post-process today's revisions to smooth daily load without altering schedules."""
     today = datetime.now().date()
+    today_str = format_date_for_storage(today)
+
+    if "dlb_hidden" not in st.session_state:
+        st.session_state.dlb_hidden = {}
+    hidden_for_day = st.session_state.dlb_hidden.get(today_str, set())
 
     adjusted = []
     for rev in todays_revisions:
+        if _revision_key(rev) in hidden_for_day:
+            continue
         date_str = _get_revision_date_str(data, person, rev)
         rev_copy = dict(rev)
         rev_copy["date_str"] = date_str
@@ -432,6 +445,7 @@ def apply_daily_load_balancing(data, person, todays_revisions):
         extras = high_diff[2:]
         for extra in extras:
             extra["moved_by_dlb"] = True
+            hidden_for_day.add(_revision_key(extra))
             adjusted.remove(extra)
 
     # D4 — Overload Smoothing
@@ -457,6 +471,7 @@ def apply_daily_load_balancing(data, person, todays_revisions):
         if not candidate:
             break
         candidate["moved_by_dlb"] = True
+        hidden_for_day.add(_revision_key(candidate))
         adjusted.remove(candidate)
 
     # D3 — No-Zero Rule
@@ -478,6 +493,9 @@ def apply_daily_load_balancing(data, person, todays_revisions):
             pulled["date"] = format_date_for_display(format_date_for_storage(today))
             pulled["date_str"] = format_date_for_storage(today)
             adjusted.append(pulled)
+
+    if hidden_for_day:
+        st.session_state.dlb_hidden[today_str] = hidden_for_day
 
     return adjusted
 
