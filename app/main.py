@@ -2,6 +2,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 import json
 import os
+import time
 from pathlib import Path
 import base64
 import requests
@@ -112,7 +113,8 @@ def _github_headers():
     return {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
-        "User-Agent": "streamlit-gk-revision-app"
+        "User-Agent": "streamlit-gk-revision-app",
+        "Cache-Control": "no-cache"
     }
 
 
@@ -134,7 +136,7 @@ def load_data():
         response = requests.get(
             GITHUB_API_URL,
             headers=headers,
-            params={"ref": GITHUB_BRANCH},
+            params={"ref": GITHUB_BRANCH, "ts": int(time.time())},
             timeout=10
         )
     except requests.RequestException:
@@ -190,7 +192,7 @@ def save_data(data):
         get_response = requests.get(
             GITHUB_API_URL,
             headers=headers,
-            params={"ref": GITHUB_BRANCH},
+            params={"ref": GITHUB_BRANCH, "ts": int(time.time())},
             timeout=10
         )
     except requests.RequestException:
@@ -246,7 +248,7 @@ def save_data(data):
             retry_get = requests.get(
                 GITHUB_API_URL,
                 headers=headers,
-                params={"ref": GITHUB_BRANCH},
+                params={"ref": GITHUB_BRANCH, "ts": int(time.time())},
                 timeout=10
             )
         except requests.RequestException:
