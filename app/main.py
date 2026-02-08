@@ -649,13 +649,18 @@ def grade_revision(data, person, lecture_id, stage, grade, is_emergency=False, e
 
     verified = False
     if save_ok:
-        verify_data = load_data()
-        if is_emergency:
-            emergency = verify_data["persons"][person]["emergency_revisions"].get(emergency_id)
-            verified = bool(emergency and emergency.get("completed") and emergency.get("grade") == grade)
-        else:
-            grade_key = f"{lecture_id}_{stage}"
-            verified = verify_data["persons"][person]["grades"].get(grade_key) == grade
+        for attempt in range(3):
+            verify_data = load_data()
+            if is_emergency:
+                emergency = verify_data["persons"][person]["emergency_revisions"].get(emergency_id)
+                verified = bool(emergency and emergency.get("completed") and emergency.get("grade") == grade)
+            else:
+                grade_key = f"{lecture_id}_{stage}"
+                verified = verify_data["persons"][person]["grades"].get(grade_key) == grade
+            if verified:
+                break
+            time.sleep(0.4)
+    print(f"[GitHub] grade verify: {verified}")
     st.session_state.last_save_ok = verified
 
     # Clear DLB plan so the next render reflects actual persisted state.
