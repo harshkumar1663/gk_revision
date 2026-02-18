@@ -350,6 +350,7 @@ def get_todays_revisions(data, person):
     return todays_revisions
 
 
+
 def get_missed_revisions(data, person):
     """Get all missed revisions (date < today with no grade)."""
     today = datetime.now().date()
@@ -425,6 +426,38 @@ def reflow_revisions(data, lecture_id):
     
     lecture["revision_dates"] = new_dates
     save_data(data)
+
+
+def get_revisions_for_date(data, person, selected_date):
+    """Get all revisions scheduled for a specific date for a person."""
+    revisions = []
+    
+    for lecture_id, lecture in data["lectures"].items():
+        for stage, date_str in lecture["revision_dates"].items():
+            revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            grade_key = f"{lecture_id}_{stage}"
+            grade = data["persons"][person]["grades"].get(grade_key)
+            
+            if revision_date == selected_date:
+                revisions.append({
+                    "lecture_id": lecture_id,
+                    "lecture_name": lecture["name"],
+                    "stage": stage,
+                    "date": format_date_for_display(date_str),
+                    "difficulty": lecture["difficulty"],
+                    "category": lecture["category"],
+                    "date_str": date_str,
+                    "grade": grade
+                })
+    
+    stage_order = {"R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
+    revisions.sort(
+        key=lambda x: (
+            stage_order.get(x["stage"], 9),
+            x["lecture_name"]
+        )
+    )
+    return revisions
 
 
 # =======================
@@ -695,6 +728,84 @@ def view_add_lecture():
 
 
 # =======================
+# VIEW: Daily Schedule
+# =======================
+def view_daily_schedule():
+    st.title("📅 Daily Schedule")
+    
+    data = load_data()
+    
+    # Person Selector
+    col1, col2, col3 = st.columns([1, 1, 4])
+    with col1:
+        if st.button("👨 Harsh", key="schedule_harsh", use_container_width=True,
+                    type="primary" if st.session_state.current_person == "Harsh" else "secondary"):
+            st.session_state.current_person = "Harsh"
+            st.rerun()
+    with col2:
+        if st.button("👩 Divya", key="schedule_divya", use_container_width=True,
+                    type="primary" if st.session_state.current_person == "Divya" else "secondary"):
+            st.session_state.current_person = "Divya"
+            st.rerun()
+    
+    st.divider()
+    
+    # Date picker
+    selected_date = st.date_input(
+        "Select a Date",
+        value=datetime.now().date(),
+        format="DD/MM/YYYY"
+    )
+    
+    st.divider()
+    
+    # Get revisions for selected date
+    revisions = get_revisions_for_date(data, st.session_state.current_person, selected_date)
+    
+    # Display the date in a friendly format
+    date_display = selected_date.strftime("%A, %d %B %Y")
+    st.subheader(f"Revisions for {date_display}")
+    st.write(f"for **{st.session_state.current_person}**")
+    
+    if revisions:
+        st.write(f"📌 **{len(revisions)} revision(s) scheduled:**")
+        st.divider()
+        
+        for rev in revisions:
+            with st.container():
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    # Status indicator
+                    status = "✅" if rev["grade"] else "⏳"
+                    st.markdown(f"### {status} {rev['lecture_name']}")
+                    st.write(f"**Stage:** {rev['stage']} | **Category:** {rev['category']} | **Difficulty:** {rev['difficulty']}/5")
+                    if rev["grade"]:
+                        st.write(f"**Status:** ✓ {rev['grade']}")
+                
+                with col2:
+                    button_key_base = f"schedule_{rev['lecture_id']}_{rev['stage']}"
+                    
+                    if rev["grade"]:
+                        # Already graded - show undo
+                        if st.button("🔄 Undo", key=f"undo_{button_key_base}", use_container_width=True):
+                            grade_key = f"{rev['lecture_id']}_{rev['stage']}"
+                            del data["persons"][st.session_state.current_person]["grades"][grade_key]
+                            save_data(data)
+                            st.rerun()
+                    else:
+                        # Not graded - show mark as complete
+                        if st.button("✅ Mark", key=f"mark_{button_key_base}", use_container_width=True):
+                            grade_revision(data, st.session_state.current_person,
+                                         rev["lecture_id"], rev["stage"], "PERFECT")
+                            st.rerun()
+                
+                st.divider()
+    else:
+        st.info(f"🎉 No revisions scheduled for {date_display}!")
+
+
+# =======================
 # VIEW: Full Revision Plan
 # =======================
 def view_revision_plan():
@@ -874,7 +985,7 @@ def main():
         
         view = st.radio(
             "Navigation",
-            ["🏠 Home / Today", "➕ Add Lecture", "📋 Full Revision Plan"],
+            ["🏠 Home / Today", "➕ Add Lecture", "� Daily Schedule", "📋 Full Revision Plan"],
             key="navigation"
         )
         
@@ -885,6 +996,8 @@ def main():
         view_home()
     elif view == "➕ Add Lecture":
         view_add_lecture()
+    elif view == "📅 Daily Schedule":
+        view_daily_schedule()
     elif view == "📋 Full Revision Plan":
         view_revision_plan()
 
