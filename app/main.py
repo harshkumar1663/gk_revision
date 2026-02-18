@@ -985,7 +985,7 @@ def main():
         
         view = st.radio(
             "Navigation",
-            ["🏠 Home / Today", "➕ Add Lecture", "� Daily Schedule", "📋 Full Revision Plan"],
+            ["🏠 Home / Today", "➕ Add Lecture", "📅 Daily Schedule", "📋 Full Revision Plan"],
             key="navigation"
         )
         
