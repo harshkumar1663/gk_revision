@@ -6,6 +6,24 @@ import time
 from pathlib import Path
 import base64
 import requests
+import pandas as pd
+import plotly.graph_objects as go
+
+from scheduling_engine import (
+    MAX_DAILY_LOAD,
+    SOFT_LIMIT,
+    STAGE_ORDER_INDEX,
+    calculate_daily_load,
+    calculate_revision_dates_balanced,
+    calculate_revision_weight,
+)
+from analytics_engine import analyze_performance_patterns, timeline_advanced_metrics
+from adaptation_engine import (
+    ensure_person_capacity_schema,
+    get_effective_capacity,
+    get_person_capacity,
+    update_personal_capacity,
+)
 
 # Page config
 st.set_page_config(
@@ -93,8 +111,24 @@ def _default_data():
         "exam_date": None,
         "lectures": {},
         "persons": {
-            "Harsh": {"grades": {}, "emergency_revisions": {}},
-            "Divya": {"grades": {}, "emergency_revisions": {}}
+            "Harsh": {
+                "grades": {},
+                "emergency_revisions": {},
+                "capacity": {
+                    "max_daily_load": MAX_DAILY_LOAD,
+                    "soft_limit": SOFT_LIMIT,
+                    "max_same_category_per_day": 3,
+                },
+            },
+            "Divya": {
+                "grades": {},
+                "emergency_revisions": {},
+                "capacity": {
+                    "max_daily_load": MAX_DAILY_LOAD,
+                    "soft_limit": SOFT_LIMIT,
+                    "max_same_category_per_day": 3,
+                },
+            },
         }
     }
 
@@ -166,16 +200,13 @@ def load_data():
     if "persons" not in data:
         data["persons"] = {
             "Harsh": {"grades": {}, "emergency_revisions": {}},
-            "Divya": {"grades": {}, "emergency_revisions": {}}
+            "Divya": {"grades": {}, "emergency_revisions": {}},
         }
 
     for person in PERSONS:
         if person not in data["persons"]:
             data["persons"][person] = {"grades": {}, "emergency_revisions": {}}
-        if "grades" not in data["persons"][person]:
-            data["persons"][person]["grades"] = {}
-        if "emergency_revisions" not in data["persons"][person]:
-            data["persons"][person]["emergency_revisions"] = {}
+        ensure_person_capacity_schema(data, person)
 
     return data
 
@@ -285,37 +316,18 @@ def save_data(data):
 
 
 def calculate_revision_dates(study_date_str, exam_date_str, difficulty):
-    """Calculate R1-R7 dates based on ratios and difficulty"""
-    if not exam_date_str:
-        return {}
-
-    study_date = datetime.strptime(study_date_str, "%Y-%m-%d")
-    exam_date = datetime.strptime(exam_date_str, "%Y-%m-%d")
-
-    T = (exam_date - study_date).days
-
-    if T <= 0:
-        return {}
-
-    # Difficulty tightens/loosens gaps (1=loose, 5=tight)
-    # Higher difficulty means more frequent revisions (smaller multiplier)
-    difficulty_factor = 1.0 + (3 - difficulty) * 0.15
-
-    revision_dates = {}
-    stages_created = 0
-
-    for stage, ratio in REVISION_RATIOS.items():
-        days_offset = int(T * ratio * difficulty_factor)
-        revision_date = study_date + timedelta(days=days_offset)
-
-        # Hard ceiling: no revision may exceed exam date
-        if revision_date > exam_date:
-            break
-
-        revision_dates[stage] = format_date_for_storage(revision_date)
-        stages_created += 1
-
-    return revision_dates
+    """Backward-compatible wrapper using the new balanced scheduling engine."""
+    data = load_data()
+    effective_capacity = get_effective_capacity(data)
+    return calculate_revision_dates_balanced(
+        study_date_str=study_date_str,
+        exam_date_str=exam_date_str,
+        difficulty=difficulty,
+        category="Miscellaneous",
+        data=data,
+        lecture_id=None,
+        capacity=effective_capacity,
+    )
 
 
 def get_todays_revisions(data, person):
@@ -410,6 +422,11 @@ def grade_revision(data, person, lecture_id, stage, grade):
             time.sleep(0.4)
     print(f"[GitHub] grade verify: {verified}")
 
+    # Recompute personal capacity from recent outcomes; affects future scheduling only.
+    capacity_update = update_personal_capacity(data, person)
+    if capacity_update.get("updated"):
+        save_data(data)
+
 
 def reflow_revisions(data, lecture_id):
     """Reflow revisions for a lecture (affects both persons)"""
@@ -418,10 +435,15 @@ def reflow_revisions(data, lecture_id):
     if not data["exam_date"]:
         return
     
-    new_dates = calculate_revision_dates(
-        lecture["study_date"],
-        data["exam_date"],
-        lecture["difficulty"]
+    effective_capacity = get_effective_capacity(data)
+    new_dates = calculate_revision_dates_balanced(
+        study_date_str=lecture["study_date"],
+        exam_date_str=data["exam_date"],
+        difficulty=lecture["difficulty"],
+        category=lecture["category"],
+        data=data,
+        lecture_id=lecture_id,
+        capacity=effective_capacity,
     )
     
     lecture["revision_dates"] = new_dates
@@ -707,10 +729,15 @@ def view_add_lecture():
                 lecture_id = f"lecture_{datetime.now().timestamp()}"
                 
                 # Calculate revision dates
-                revision_dates = calculate_revision_dates(
-                    format_date_for_storage(study_date),
-                    data["exam_date"],
-                    difficulty
+                effective_capacity = get_effective_capacity(data)
+                revision_dates = calculate_revision_dates_balanced(
+                    study_date_str=format_date_for_storage(study_date),
+                    exam_date_str=data["exam_date"],
+                    difficulty=difficulty,
+                    category=category,
+                    data=data,
+                    lecture_id=None,
+                    capacity=effective_capacity,
                 )
                 
                 # Add lecture (affects both persons)
@@ -976,6 +1003,207 @@ def view_revision_plan():
 
 
 # =======================
+# VIEW: Cognitive Load Timeline
+# =======================
+def _timeline_series(data, person, horizon_days):
+    today = datetime.now().date()
+    end_date = today + timedelta(days=horizon_days)
+    load_map = calculate_daily_load(data, person=person, start_date=today, end_date=end_date)
+
+    rows = []
+    cursor = today
+    while cursor <= end_date:
+        key = format_date_for_storage(cursor)
+        bucket = load_map.get(key, {})
+        rows.append(
+            {
+                "date": key,
+                "load": float(bucket.get("total_load", 0.0)),
+                "revision_count": int(bucket.get("revision_count", 0)),
+            }
+        )
+        cursor += timedelta(days=1)
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["smoothed"] = df["load"].rolling(window=3, min_periods=1).mean().round(2)
+    else:
+        df["smoothed"] = []
+
+    return df, load_map
+
+
+def _build_timeline_chart(df, exam_date_str):
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=df["load"],
+            mode="lines+markers",
+            name="Daily Load",
+            line={"width": 2, "color": "#0E7490"},
+            marker={"size": 6},
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=df["smoothed"],
+            mode="lines",
+            name="Smoothed (3d)",
+            line={"width": 3, "dash": "dot", "color": "#111827"},
+        )
+    )
+
+    y_max = max(12, float(df["load"].max()) + 1 if not df.empty else 12)
+    bands = [
+        (0, 5, "rgba(34,197,94,0.12)"),
+        (5, 8, "rgba(234,179,8,0.14)"),
+        (8, 10, "rgba(249,115,22,0.16)"),
+        (10, y_max, "rgba(239,68,68,0.16)"),
+    ]
+    for y0, y1, color in bands:
+        fig.add_hrect(y0=y0, y1=y1, line_width=0, fillcolor=color)
+
+    if exam_date_str:
+        fig.add_vline(
+            x=exam_date_str,
+            line_width=2,
+            line_dash="dash",
+            line_color="#B91C1C",
+            annotation_text="Exam",
+            annotation_position="top right",
+        )
+
+    fig.update_layout(
+        height=420,
+        margin={"l": 20, "r": 20, "t": 30, "b": 20},
+        xaxis={"rangeslider": {"visible": True}},
+        yaxis={"title": "Cognitive Load"},
+        hovermode="x unified",
+    )
+    fig.update_traces(hovertemplate="Date: %{x}<br>Load: %{y}<extra></extra>")
+    fig.update_layout(clickmode="event+select")
+
+    return fig
+
+
+def _render_timeline_day_details(load_map, person, selected_date_str):
+    bucket = load_map.get(selected_date_str, {})
+    revisions = bucket.get("revisions", [])
+
+    st.subheader(f"Detail: {selected_date_str}")
+    st.write(f"**Total load:** {bucket.get('total_load', 0.0)}")
+    st.write(f"**Revision count:** {bucket.get('revision_count', 0)}")
+    st.write(f"**Stage breakdown:** {bucket.get('stage_breakdown', {})}")
+    st.write(f"**Category breakdown:** {bucket.get('category_breakdown', {})}")
+
+    if not revisions:
+        st.info("No revisions on this date.")
+        return
+
+    st.markdown("**Individual revisions:**")
+    for rev in revisions:
+        grade_status = rev.get("grade") or "Pending"
+        st.write(
+            f"- {rev['lecture_name']} | {rev['stage']} | D{rev['difficulty']} | "
+            f"W {rev['weight']} | {grade_status}"
+        )
+
+
+def view_cognitive_timeline():
+    st.title("📊 Cognitive Load Timeline")
+    data = load_data()
+
+    # Person selector
+    col1, col2, col3 = st.columns([1, 1, 4])
+    with col1:
+        if st.button("👨 Harsh", key="timeline_harsh", use_container_width=True,
+                    type="primary" if st.session_state.current_person == "Harsh" else "secondary"):
+            st.session_state.current_person = "Harsh"
+            st.rerun()
+    with col2:
+        if st.button("👩 Divya", key="timeline_divya", use_container_width=True,
+                    type="primary" if st.session_state.current_person == "Divya" else "secondary"):
+            st.session_state.current_person = "Divya"
+            st.rerun()
+
+    person = st.session_state.current_person
+    capacity_update = update_personal_capacity(data, person)
+    if capacity_update.get("updated"):
+        save_data(data)
+
+    person_capacity = get_person_capacity(data, person)
+    st.caption(
+        f"Dynamic capacity for {person}: max {person_capacity['max_daily_load']} | "
+        f"soft {person_capacity['soft_limit']} | "
+        f"max/category {person_capacity['max_same_category_per_day']}"
+    )
+
+    horizon_days = st.slider("Timeline horizon (days)", min_value=30, max_value=90, value=60, step=5)
+    df, load_map = _timeline_series(data, person, horizon_days)
+
+    metrics = timeline_advanced_metrics(
+        load_series=df[["date", "load"]].to_dict("records") if not df.empty else [],
+        max_daily_load=person_capacity["max_daily_load"],
+    )
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("30-Day Avg Load", metrics["avg_30_day_load"])
+    m2.metric("Peak Load Date", metrics["peak_load_date"] or "N/A")
+    m3.metric("Weekly Volatility", metrics["weekly_volatility"])
+    m4.metric("Recovery Days (<3)", metrics["recovery_days"])
+    m5.metric("Overload Days", metrics["overload_days"])
+
+    if df.empty:
+        st.info("No timeline data available yet.")
+        return
+
+    fig = _build_timeline_chart(df, data.get("exam_date"))
+    selected = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+
+    selected_date_str = None
+    points = selected.get("selection", {}).get("points", []) if isinstance(selected, dict) else []
+    if points:
+        selected_date_str = str(points[0].get("x"))[:10]
+
+    fallback_date = st.date_input(
+        "Select date for detail",
+        value=datetime.now().date(),
+        format="DD/MM/YYYY",
+        key="timeline_detail_date",
+    )
+    if not selected_date_str:
+        selected_date_str = format_date_for_storage(fallback_date)
+
+    left, right = st.columns([3, 2])
+    with left:
+        _render_timeline_day_details(load_map, person, selected_date_str)
+
+    with right:
+        st.subheader("Performance Insights")
+        insights = analyze_performance_patterns(data, person)
+        st.write(f"**Avg load on FAIL days:** {insights['average_load_fail_days']}")
+        st.write(f"**Avg load on PERFECT days:** {insights['average_load_perfect_days']}")
+        st.write(f"**Fail rate when load > soft limit:** {insights['fail_rate_over_soft_limit']}%")
+
+        st.markdown("**Category-wise fail rate**")
+        for category, rate in insights["category_wise_fail_rate"].items():
+            st.write(f"- {category}: {rate}%")
+
+        st.markdown("**Stage-wise fail frequency**")
+        for stage, payload in insights["stage_wise_fail_frequency"].items():
+            st.write(f"- {stage}: {payload['fail_count']} fails ({payload['fail_rate']}%)")
+
+        st.markdown("**Weekly trend**")
+        for row in insights["weekly_performance_trend"]:
+            st.write(
+                f"- {row['week']}: fail {row['fail_rate']}% | "
+                f"perfect {row['perfect_rate']}% | samples {row['total']}"
+            )
+
+# =======================
 # MAIN APP
 # =======================
 def main():
@@ -985,7 +1213,13 @@ def main():
         
         view = st.radio(
             "Navigation",
-            ["🏠 Home / Today", "➕ Add Lecture", "📅 Daily Schedule", "📋 Full Revision Plan"],
+            [
+                "🏠 Home / Today",
+                "➕ Add Lecture",
+                "📅 Daily Schedule",
+                "📋 Full Revision Plan",
+                "📊 Cognitive Load Timeline",
+            ],
             key="navigation"
         )
         
@@ -1000,6 +1234,8 @@ def main():
         view_daily_schedule()
     elif view == "📋 Full Revision Plan":
         view_revision_plan()
+    elif view == "📊 Cognitive Load Timeline":
+        view_cognitive_timeline()
 
 
 if __name__ == "__main__":
