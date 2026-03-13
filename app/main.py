@@ -13,6 +13,7 @@ from scheduling_engine import (
     MAX_DAILY_LOAD,
     SOFT_LIMIT,
     STAGE_ORDER_INDEX,
+    auto_rebalance_window,
     calculate_daily_load,
     calculate_revision_dates_balanced,
     calculate_revision_weight,
@@ -1202,6 +1203,32 @@ def view_cognitive_timeline():
                 f"- {row['week']}: fail {row['fail_rate']}% | "
                 f"perfect {row['perfect_rate']}% | samples {row['total']}"
             )
+
+    st.divider()
+    st.subheader("Auto-Rebalance")
+    start_date = st.date_input("Window start", value=datetime.now().date(), format="DD/MM/YYYY", key="rebalance_start")
+    days = st.slider("Window length (days)", min_value=3, max_value=21, value=7)
+
+    confirm = st.checkbox("I confirm I want to rebalance upcoming revisions", key="rebalance_confirm")
+    if st.button("Auto-Smooth Next 7 Days", use_container_width=True):
+        if not confirm:
+            st.warning("Please confirm before running auto-rebalance.")
+        else:
+            rebalanced_data, summary = auto_rebalance_window(
+                data=data,
+                person=person,
+                start_date=start_date,
+                days=days,
+                capacity=person_capacity,
+            )
+            if summary["moved"] > 0:
+                save_data(rebalanced_data)
+                st.success(
+                    f"Moved {summary['moved']} revision(s). Overload days: "
+                    f"{summary['overload_days_before']} -> {summary['overload_days_after']}"
+                )
+            else:
+                st.info("No movable revisions found for the selected window.")
 
 # =======================
 # MAIN APP
