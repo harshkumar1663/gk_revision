@@ -1068,13 +1068,27 @@ def _build_timeline_chart(df, exam_date_str):
         fig.add_hrect(y0=y0, y1=y1, line_width=0, fillcolor=color)
 
     if exam_date_str:
-        fig.add_vline(
+        # add_vline can fail on some Plotly/Python runtime combos with date strings.
+        # Use an explicit shape + annotation for robust rendering.
+        fig.add_shape(
+            type="line",
+            x0=exam_date_str,
+            x1=exam_date_str,
+            y0=0,
+            y1=1,
+            xref="x",
+            yref="paper",
+            line={"width": 2, "dash": "dash", "color": "#B91C1C"},
+        )
+        fig.add_annotation(
             x=exam_date_str,
-            line_width=2,
-            line_dash="dash",
-            line_color="#B91C1C",
-            annotation_text="Exam",
-            annotation_position="top right",
+            y=1,
+            xref="x",
+            yref="paper",
+            text="Exam",
+            showarrow=False,
+            yshift=10,
+            font={"color": "#B91C1C"},
         )
 
     fig.update_layout(
