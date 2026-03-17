@@ -62,6 +62,13 @@ GITHUB_FILE_PATH = "gk_data.json"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
 
 # Date formatting helpers
+def get_grade_value(grade_entry):
+    """Extract grade string from either legacy string format or new dict format."""
+    if isinstance(grade_entry, dict):
+        return grade_entry.get("grade", "")
+    return grade_entry or ""
+
+
 def format_date_for_display(date_str):
     """Convert YYYY-MM-DD to DD/MM/YY for display"""
     if not date_str:
@@ -177,7 +184,116 @@ def load_data():
         if "emergency_revisions" not in data["persons"][person]:
             data["persons"][person]["emergency_revisions"] = {}
 
+    # ── Adaptive grading migration (runs once, then no-ops) ──────────────────
+    today_str = format_date_for_storage(datetime.now())
+    needs_save = False
+
+    if "adaptive_grading_enabled" not in data:
+        data["adaptive_grading_enabled"] = True
+        needs_save = True
+
+    if "adaptive_start_date" not in data:
+        data["adaptive_start_date"] = today_str
+        needs_save = True
+
+    for lecture in data.get("lectures", {}).values():
+        if "interval_multiplier" not in lecture:
+            lecture["interval_multiplier"] = 1.0
+            needs_save = True
+        if "skip_count" in lecture:
+            lecture.pop("skip_count", None)
+            needs_save = True
+
+    for person in PERSONS:
+        if "skip_counts" not in data["persons"].get(person, {}):
+            data["persons"][person]["skip_counts"] = {}
+            needs_save = True
+
+    # Wrap legacy string grades into {"grade": ..., "timestamp": <revision_date>}
+    # Legacy timestamps are always in the past → adaptive_start_date check skips them
+    for person in PERSONS:
+        grades = data["persons"].get(person, {}).get("grades", {})
+        for grade_key, grade_val in list(grades.items()):
+            if isinstance(grade_val, str):
+                parts = grade_key.rsplit("_", 1)
+                revision_timestamp = "1970-01-01"  # far-past fallback → never adaptive
+                if len(parts) == 2:
+                    lid, stage = parts
+                    rev_dates = data.get("lectures", {}).get(lid, {}).get("revision_dates", {})
+                    if stage in rev_dates:
+                        revision_timestamp = rev_dates[stage]
+                grades[grade_key] = {"grade": grade_val, "timestamp": revision_timestamp}
+                needs_save = True
+
+    if needs_save:
+        save_data(data)
+    # ── End adaptive migration ────────────────────────────────────────────────
+
     return data
+
+
+# =======================
+# ADAPTIVE LOGIC HELPERS
+# =======================
+def _apply_fail_logic(data, person, lecture_id, stage, today_str, adaptive_start, prev_grade_entry=None):
+    """Tighten interval_multiplier, insert emergency revision, double-tighten on consecutive FAIL."""
+    lecture = data["lectures"].get(lecture_id)
+    if not lecture:
+        return
+
+    lecture["interval_multiplier"] = round(lecture.get("interval_multiplier", 1.0) * 0.85, 4)
+
+    # Extra tightening if previous NEW grade for same stage was also FAIL
+    if prev_grade_entry is not None:
+        prev_val = get_grade_value(prev_grade_entry)
+        prev_ts = prev_grade_entry.get("timestamp", "1970-01-01") if isinstance(prev_grade_entry, dict) else "1970-01-01"
+        if prev_val == "FAIL" and prev_ts >= adaptive_start:
+            lecture["interval_multiplier"] = round(lecture["interval_multiplier"] * 0.85, 4)
+
+    # Insert emergency revision at +2 days
+    emergency_date = datetime.strptime(today_str, "%Y-%m-%d") + timedelta(days=2)
+    emergency_key = f"{lecture_id}_{stage}_emergency"
+    data["persons"][person]["emergency_revisions"][emergency_key] = format_date_for_storage(emergency_date)
+
+
+def _apply_partial_logic(data, lecture_id, stage):
+    """Tighten interval_multiplier and pull next revision 20% closer."""
+    lecture = data["lectures"].get(lecture_id)
+    if not lecture:
+        return
+
+    lecture["interval_multiplier"] = round(lecture.get("interval_multiplier", 1.0) * 0.9, 4)
+
+    stage_order = ["R1", "R2", "R3", "R4", "R5", "R6", "R7"]
+    if stage in stage_order:
+        current_idx = stage_order.index(stage)
+        if current_idx + 1 < len(stage_order):
+            next_stage = stage_order[current_idx + 1]
+            if next_stage in lecture["revision_dates"]:
+                next_date_str = lecture["revision_dates"][next_stage]
+                today = datetime.now().date()
+                next_date = datetime.strptime(next_date_str, "%Y-%m-%d").date()
+                days_until = (next_date - today).days
+                if days_until > 1:
+                    new_days = max(1, int(days_until * 0.8))
+                    lecture["revision_dates"][next_stage] = format_date_for_storage(
+                        today + timedelta(days=new_days)
+                    )
+
+
+def _apply_perfect_logic(data, person, lecture_id, adaptive_start, prev_grade_entry=None):
+    """Relax interval_multiplier on PERFECT streak and reset skip_count."""
+    lecture = data["lectures"].get(lecture_id)
+    if not lecture:
+        return
+
+    data["persons"][person].setdefault("skip_counts", {})[lecture_id] = 0
+
+    if prev_grade_entry is not None:
+        prev_val = get_grade_value(prev_grade_entry)
+        prev_ts = prev_grade_entry.get("timestamp", "1970-01-01") if isinstance(prev_grade_entry, dict) else "1970-01-01"
+        if prev_val == "PERFECT" and prev_ts >= adaptive_start:
+            lecture["interval_multiplier"] = round(lecture.get("interval_multiplier", 1.0) * 1.1, 4)
 
 
 def save_data(data):
@@ -284,8 +400,8 @@ def save_data(data):
     return False
 
 
-def calculate_revision_dates(study_date_str, exam_date_str, difficulty):
-    """Calculate R1-R7 dates based on ratios and difficulty"""
+def calculate_revision_dates(study_date_str, exam_date_str, difficulty, interval_multiplier=1.0):
+    """Calculate R1-R7 dates based on ratios, difficulty, and interval multiplier"""
     if not exam_date_str:
         return {}
 
@@ -305,7 +421,7 @@ def calculate_revision_dates(study_date_str, exam_date_str, difficulty):
     stages_created = 0
 
     for stage, ratio in REVISION_RATIOS.items():
-        days_offset = int(T * ratio * difficulty_factor)
+        days_offset = int(T * ratio * difficulty_factor * interval_multiplier)
         revision_date = study_date + timedelta(days=days_offset)
 
         # Hard ceiling: no revision may exceed exam date
@@ -319,15 +435,17 @@ def calculate_revision_dates(study_date_str, exam_date_str, difficulty):
 
 
 def get_todays_revisions(data, person):
-    """Get all revisions due today for a person."""
+    """Get all revisions due today for a person, including emergency revisions."""
     today = datetime.now().date()
     todays_revisions = []
+    person_data = data["persons"][person]
+    emergency_revisions = person_data.get("emergency_revisions", {})
 
     for lecture_id, lecture in data["lectures"].items():
         for stage, date_str in lecture["revision_dates"].items():
             revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             grade_key = f"{lecture_id}_{stage}"
-            grade = data["persons"][person]["grades"].get(grade_key)
+            grade = person_data["grades"].get(grade_key)
 
             if not grade and revision_date == today:
                 todays_revisions.append({
@@ -340,10 +458,32 @@ def get_todays_revisions(data, person):
                     "date_str": date_str
                 })
 
+        lecture_prefix = f"{lecture_id}_"
+        for emergency_key, date_str in emergency_revisions.items():
+            if not emergency_key.startswith(lecture_prefix) or not emergency_key.endswith("_emergency"):
+                continue
+
+            revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            grade = person_data["grades"].get(emergency_key)
+            if grade or revision_date != today:
+                continue
+
+            base_stage = emergency_key[len(lecture_prefix):-len("_emergency")]
+            todays_revisions.append({
+                "lecture_id": lecture_id,
+                "lecture_name": lecture["name"],
+                "stage": f"{base_stage} (Emergency)",
+                "date": format_date_for_display(date_str),
+                "difficulty": lecture["difficulty"],
+                "category": lecture["category"],
+                "date_str": date_str
+            })
+
     stage_order = {"R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
     todays_revisions.sort(
         key=lambda x: (
-            stage_order.get(x["stage"], 9),
+            stage_order.get(x["stage"].split()[0], 9),
+            1 if "(Emergency)" in x["stage"] else 0,
             x["lecture_name"]
         )
     )
@@ -352,15 +492,17 @@ def get_todays_revisions(data, person):
 
 
 def get_missed_revisions(data, person):
-    """Get all missed revisions (date < today with no grade)."""
+    """Get all missed revisions (date < today with no grade), including emergencies."""
     today = datetime.now().date()
     missed_revisions = []
+    person_data = data["persons"][person]
+    emergency_revisions = person_data.get("emergency_revisions", {})
 
     for lecture_id, lecture in data["lectures"].items():
         for stage, date_str in lecture["revision_dates"].items():
             revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             grade_key = f"{lecture_id}_{stage}"
-            grade = data["persons"][person]["grades"].get(grade_key)
+            grade = person_data["grades"].get(grade_key)
 
             if not grade and revision_date < today:
                 overdue_days = (today - revision_date).days
@@ -375,11 +517,35 @@ def get_missed_revisions(data, person):
                     "date_str": date_str
                 })
 
+        lecture_prefix = f"{lecture_id}_"
+        for emergency_key, date_str in emergency_revisions.items():
+            if not emergency_key.startswith(lecture_prefix) or not emergency_key.endswith("_emergency"):
+                continue
+
+            revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            grade = person_data["grades"].get(emergency_key)
+            if grade or revision_date >= today:
+                continue
+
+            base_stage = emergency_key[len(lecture_prefix):-len("_emergency")]
+            overdue_days = (today - revision_date).days
+            missed_revisions.append({
+                "lecture_id": lecture_id,
+                "lecture_name": lecture["name"],
+                "stage": f"{base_stage} (Emergency)",
+                "date": format_date_for_display(date_str),
+                "overdue_days": overdue_days,
+                "difficulty": lecture["difficulty"],
+                "category": lecture["category"],
+                "date_str": date_str
+            })
+
     stage_order = {"R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
     missed_revisions.sort(
         key=lambda x: (
             -x["overdue_days"],
-            stage_order.get(x["stage"], 9),
+            stage_order.get(x["stage"].split()[0], 9),
+            1 if "(Emergency)" in x["stage"] else 0,
             x["lecture_name"]
         )
     )
@@ -387,24 +553,112 @@ def get_missed_revisions(data, person):
 
 
 def grade_revision(data, person, lecture_id, stage, grade):
-    """Grade a revision for a person."""
+    """Grade a revision for a person with adaptive scheduling behavior."""
     st.session_state.last_graded_key = f"{lecture_id}_{stage}"
     st.session_state.last_graded_person = person
 
-    grade_key = f"{lecture_id}_{stage}"
-    data["persons"][person]["grades"][grade_key] = grade
+    today = datetime.now().date()
+    today_str = format_date_for_storage(today)
+    lecture = data["lectures"].get(lecture_id, {})
+    person_data = data["persons"][person]
+    emergency_revisions = person_data.setdefault("emergency_revisions", {})
+    is_emergency = stage.endswith(" (Emergency)")
+    base_stage = stage.replace(" (Emergency)", "")
+    standard_grade_key = f"{lecture_id}_{base_stage}"
+    emergency_grade_key = f"{lecture_id}_{base_stage}_emergency"
+    storage_grade_key = emergency_grade_key if is_emergency else standard_grade_key
+    previous_grade_key = standard_grade_key if is_emergency else storage_grade_key
+    adaptive_start = data.get("adaptive_start_date", today_str)
+    adaptive_active = data.get("adaptive_grading_enabled", True) and today_str >= adaptive_start
+
+    if grade == "SKIP" and adaptive_active:
+        skip_counts = person_data.setdefault("skip_counts", {})
+        skip_counts[lecture_id] = skip_counts.get(lecture_id, 0) + 1
+
+        if is_emergency:
+            current_date_str = emergency_revisions.get(emergency_grade_key)
+            if current_date_str:
+                new_date = datetime.strptime(current_date_str, "%Y-%m-%d") + timedelta(days=1)
+                emergency_revisions[emergency_grade_key] = format_date_for_storage(new_date)
+        else:
+            current_date_str = lecture.get("revision_dates", {}).get(base_stage)
+            if current_date_str:
+                new_date = datetime.strptime(current_date_str, "%Y-%m-%d") + timedelta(days=1)
+                lecture["revision_dates"][base_stage] = format_date_for_storage(new_date)
+
+        if skip_counts[lecture_id] >= 3:
+            prev_grade_entry = person_data["grades"].get(previous_grade_key)
+            skip_counts[lecture_id] = 0
+            if is_emergency:
+                emergency_revisions.pop(emergency_grade_key, None)
+            _apply_fail_logic(data, person, lecture_id, base_stage, today_str, adaptive_start, prev_grade_entry)
+            reflow_revisions(data, lecture_id)
+
+        save_ok = save_data(data)
+        if not save_ok:
+            fresh_data = load_data()
+            fresh_data["lectures"][lecture_id] = data["lectures"][lecture_id]
+            fresh_person = fresh_data["persons"][person]
+            fresh_person["emergency_revisions"] = person_data["emergency_revisions"]
+            fresh_person["skip_counts"] = person_data.get("skip_counts", {})
+            save_ok = save_data(fresh_data)
+        return
+
+    prev_grade_entry = person_data["grades"].get(previous_grade_key)
+
+    if is_emergency:
+        emergency_revisions.pop(emergency_grade_key, None)
+
+    person_data["grades"][storage_grade_key] = {"grade": grade, "timestamp": today_str}
+
+    if adaptive_active:
+        if grade == "FAIL":
+            person_data.setdefault("skip_counts", {})[lecture_id] = 0
+            _apply_fail_logic(data, person, lecture_id, base_stage, today_str, adaptive_start, prev_grade_entry)
+            reflow_revisions(data, lecture_id)
+        elif grade == "PARTIAL":
+            stage_order = ["R1", "R2", "R3", "R4", "R5", "R6", "R7"]
+            next_stage = None
+            _apply_partial_logic(data, lecture_id, base_stage)
+            reflow_revisions(data, lecture_id)
+            if base_stage in stage_order:
+                current_idx = stage_order.index(base_stage)
+                if current_idx + 1 < len(stage_order):
+                    next_stage = stage_order[current_idx + 1]
+            if next_stage and next_stage in lecture.get("revision_dates", {}):
+                next_grade_key = f"{lecture_id}_{next_stage}"
+                next_date = datetime.strptime(lecture["revision_dates"][next_stage], "%Y-%m-%d").date()
+                next_has_grade = any(
+                    data["persons"][name]["grades"].get(next_grade_key)
+                    for name in PERSONS
+                    if name in data["persons"]
+                )
+                if not next_has_grade and next_date >= today:
+                    days_until = (next_date - today).days
+                    new_days = max(1, int(days_until * 0.8))
+                    lecture["revision_dates"][next_stage] = format_date_for_storage(
+                        today + timedelta(days=new_days)
+                    )
+        elif grade == "PERFECT":
+            _apply_perfect_logic(data, person, lecture_id, adaptive_start, prev_grade_entry)
+            reflow_revisions(data, lecture_id)
 
     save_ok = save_data(data)
     if not save_ok:
         fresh_data = load_data()
-        fresh_data["persons"][person]["grades"][grade_key] = grade
+        fresh_data["lectures"][lecture_id] = data["lectures"][lecture_id]
+        fresh_person = fresh_data["persons"][person]
+        fresh_person["grades"][storage_grade_key] = person_data["grades"][storage_grade_key]
+        fresh_person["emergency_revisions"] = person_data["emergency_revisions"]
+        fresh_person["skip_counts"] = person_data.get("skip_counts", {})
         save_ok = save_data(fresh_data)
 
     verified = False
     if save_ok:
         for _ in range(3):
             verify_data = load_data()
-            verified = verify_data["persons"][person]["grades"].get(grade_key) == grade
+            stored = verify_data["persons"][person]["grades"].get(storage_grade_key)
+            verified = get_grade_value(stored) == grade
             if verified:
                 break
             time.sleep(0.4)
@@ -412,32 +666,61 @@ def grade_revision(data, person, lecture_id, stage, grade):
 
 
 def reflow_revisions(data, lecture_id):
-    """Reflow revisions for a lecture (affects both persons)"""
+    """Reflow only future ungraded standard revisions for a lecture."""
     lecture = data["lectures"][lecture_id]
-    
+
     if not data["exam_date"]:
         return
-    
-    new_dates = calculate_revision_dates(
+
+    today = datetime.now().date()
+    current_dates = lecture.get("revision_dates", {})
+    recalculated_dates = calculate_revision_dates(
         lecture["study_date"],
         data["exam_date"],
-        lecture["difficulty"]
+        lecture["difficulty"],
+        lecture.get("interval_multiplier", 1.0)
     )
-    
-    lecture["revision_dates"] = new_dates
+
+    merged_dates = {}
+    for stage, current_date_str in current_dates.items():
+        current_date = datetime.strptime(current_date_str, "%Y-%m-%d").date()
+        grade_key = f"{lecture_id}_{stage}"
+        stage_has_grade = any(
+            data["persons"].get(person, {}).get("grades", {}).get(grade_key)
+            for person in PERSONS
+        )
+
+        if current_date < today or stage_has_grade:
+            merged_dates[stage] = current_date_str
+        elif stage in recalculated_dates:
+            merged_dates[stage] = recalculated_dates[stage]
+        else:
+            merged_dates[stage] = current_date_str
+
+    for stage, new_date_str in recalculated_dates.items():
+        if stage not in merged_dates:
+            merged_dates[stage] = new_date_str
+
+    lecture["revision_dates"] = {
+        stage: merged_dates[stage]
+        for stage in REVISION_RATIOS
+        if stage in merged_dates
+    }
     save_data(data)
 
 
 def get_revisions_for_date(data, person, selected_date):
-    """Get all revisions scheduled for a specific date for a person."""
+    """Get all revisions scheduled for a specific date for a person, including emergencies."""
     revisions = []
-    
+    person_data = data["persons"][person]
+    emergency_revisions = person_data.get("emergency_revisions", {})
+
     for lecture_id, lecture in data["lectures"].items():
         for stage, date_str in lecture["revision_dates"].items():
             revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
             grade_key = f"{lecture_id}_{stage}"
-            grade = data["persons"][person]["grades"].get(grade_key)
-            
+            grade = person_data["grades"].get(grade_key)
+
             if revision_date == selected_date:
                 revisions.append({
                     "lecture_id": lecture_id,
@@ -449,11 +732,33 @@ def get_revisions_for_date(data, person, selected_date):
                     "date_str": date_str,
                     "grade": grade
                 })
-    
+
+        lecture_prefix = f"{lecture_id}_"
+        for emergency_key, date_str in emergency_revisions.items():
+            if not emergency_key.startswith(lecture_prefix) or not emergency_key.endswith("_emergency"):
+                continue
+
+            revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            if revision_date != selected_date:
+                continue
+
+            base_stage = emergency_key[len(lecture_prefix):-len("_emergency")]
+            revisions.append({
+                "lecture_id": lecture_id,
+                "lecture_name": lecture["name"],
+                "stage": f"{base_stage} (Emergency)",
+                "date": format_date_for_display(date_str),
+                "difficulty": lecture["difficulty"],
+                "category": lecture["category"],
+                "date_str": date_str,
+                "grade": person_data["grades"].get(emergency_key)
+            })
+
     stage_order = {"R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
     revisions.sort(
         key=lambda x: (
-            stage_order.get(x["stage"], 9),
+            stage_order.get(x["stage"].split()[0], 9),
+            1 if "(Emergency)" in x["stage"] else 0,
             x["lecture_name"]
         )
     )
@@ -719,7 +1024,8 @@ def view_add_lecture():
                     "study_date": format_date_for_storage(study_date),
                     "difficulty": difficulty,
                     "category": category,
-                    "revision_dates": revision_dates
+                    "revision_dates": revision_dates,
+                    "interval_multiplier": 1.0
                 }
                 
                 save_data(data)
@@ -781,7 +1087,7 @@ def view_daily_schedule():
                     st.markdown(f"### {status} {rev['lecture_name']}")
                     st.write(f"**Stage:** {rev['stage']} | **Category:** {rev['category']} | **Difficulty:** {rev['difficulty']}/5")
                     if rev["grade"]:
-                        st.write(f"**Status:** ✓ {rev['grade']}")
+                        st.write(f"**Status:** ✓ {get_grade_value(rev['grade'])}")
                 
                 with col2:
                     button_key_base = f"schedule_{rev['lecture_id']}_{rev['stage']}"
@@ -953,7 +1259,7 @@ def view_revision_plan():
                                         
                                         if grade:
                                             # Done - show with grade
-                                            button_label = f"{stage}\n{format_date_compact(date_str)}\n✓ {grade}"
+                                            button_label = f"{stage}\n{format_date_compact(date_str)}\n✓ {get_grade_value(grade)}"
                                             button_type = "secondary"
                                             
                                             if st.button(button_label, key=f"done_{lecture_id}_{stage}", 
