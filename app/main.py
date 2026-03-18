@@ -33,6 +33,19 @@ st.markdown("""
         section[data-testid="stSidebar"] {
             min-height: 100vh;
         }
+
+        /* High-visibility marker for emergency revisions */
+        .emergency-chip {
+            display: inline-block;
+            background: #ff3b30;
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 12px;
+            letter-spacing: 0.4px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            margin-bottom: 8px;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -455,7 +468,8 @@ def get_todays_revisions(data, person):
                     "date": format_date_for_display(date_str),
                     "difficulty": lecture["difficulty"],
                     "category": lecture["category"],
-                    "date_str": date_str
+                    "date_str": date_str,
+                    "is_emergency": False
                 })
 
         lecture_prefix = f"{lecture_id}_"
@@ -476,7 +490,8 @@ def get_todays_revisions(data, person):
                 "date": format_date_for_display(date_str),
                 "difficulty": lecture["difficulty"],
                 "category": lecture["category"],
-                "date_str": date_str
+                "date_str": date_str,
+                "is_emergency": True
             })
 
     stage_order = {"R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
@@ -514,7 +529,8 @@ def get_missed_revisions(data, person):
                     "overdue_days": overdue_days,
                     "difficulty": lecture["difficulty"],
                     "category": lecture["category"],
-                    "date_str": date_str
+                    "date_str": date_str,
+                    "is_emergency": False
                 })
 
         lecture_prefix = f"{lecture_id}_"
@@ -537,7 +553,8 @@ def get_missed_revisions(data, person):
                 "overdue_days": overdue_days,
                 "difficulty": lecture["difficulty"],
                 "category": lecture["category"],
-                "date_str": date_str
+                "date_str": date_str,
+                "is_emergency": True
             })
 
     stage_order = {"R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
@@ -739,7 +756,8 @@ def get_revisions_for_date(data, person, selected_date):
                     "difficulty": lecture["difficulty"],
                     "category": lecture["category"],
                     "date_str": date_str,
-                    "grade": grade
+                    "grade": grade,
+                    "is_emergency": False
                 })
 
         lecture_prefix = f"{lecture_id}_"
@@ -760,7 +778,8 @@ def get_revisions_for_date(data, person, selected_date):
                 "difficulty": lecture["difficulty"],
                 "category": lecture["category"],
                 "date_str": date_str,
-                "grade": person_data["grades"].get(emergency_key)
+                "grade": person_data["grades"].get(emergency_key),
+                "is_emergency": True
             })
 
     stage_order = {"R1": 1, "R2": 2, "R3": 3, "R4": 4, "R5": 5, "R6": 6, "R7": 7}
@@ -831,6 +850,8 @@ def view_home():
         for idx, rev in enumerate(todays):
             with st.container():
                 st.markdown(f"### {rev['lecture_name']}")
+                if rev.get("is_emergency"):
+                    st.markdown('<span class="emergency-chip">EMERGENCY REVISION</span>', unsafe_allow_html=True)
                 col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
                 
                 with col1:
@@ -911,6 +932,8 @@ def view_home():
 
         for idx, rev in enumerate(missed):
             with st.expander(f"{rev['lecture_name']} - {rev['stage']} ({rev['overdue_days']} days overdue)"):
+                if rev.get("is_emergency"):
+                    st.markdown('<span class="emergency-chip">EMERGENCY REVISION</span>', unsafe_allow_html=True)
                 col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
 
                 with col1:
@@ -1094,6 +1117,8 @@ def view_daily_schedule():
                     # Status indicator
                     status = "✅" if rev["grade"] else "⏳"
                     st.markdown(f"### {status} {rev['lecture_name']}")
+                    if rev.get("is_emergency"):
+                        st.markdown('<span class="emergency-chip">EMERGENCY REVISION</span>', unsafe_allow_html=True)
                     st.write(f"**Stage:** {rev['stage']} | **Category:** {rev['category']} | **Difficulty:** {rev['difficulty']}/5")
                     if rev["grade"]:
                         st.write(f"**Status:** ✓ {get_grade_value(rev['grade'])}")
