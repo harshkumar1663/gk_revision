@@ -592,7 +592,7 @@ def grade_revision(data, person, lecture_id, stage, grade):
             if is_emergency:
                 emergency_revisions.pop(emergency_grade_key, None)
             _apply_fail_logic(data, person, lecture_id, base_stage, today_str, adaptive_start, prev_grade_entry)
-            reflow_revisions(data, lecture_id)
+            reflow_revisions(data, lecture_id, person=person)
 
         save_ok = save_data(data)
         if not save_ok:
@@ -615,12 +615,12 @@ def grade_revision(data, person, lecture_id, stage, grade):
         if grade == "FAIL":
             person_data.setdefault("skip_counts", {})[lecture_id] = 0
             _apply_fail_logic(data, person, lecture_id, base_stage, today_str, adaptive_start, prev_grade_entry)
-            reflow_revisions(data, lecture_id)
+            reflow_revisions(data, lecture_id, person=person)
         elif grade == "PARTIAL":
             stage_order = ["R1", "R2", "R3", "R4", "R5", "R6", "R7"]
             next_stage = None
             _apply_partial_logic(data, lecture_id, base_stage)
-            reflow_revisions(data, lecture_id)
+            reflow_revisions(data, lecture_id, person=person)
             if base_stage in stage_order:
                 current_idx = stage_order.index(base_stage)
                 if current_idx + 1 < len(stage_order):
@@ -641,7 +641,7 @@ def grade_revision(data, person, lecture_id, stage, grade):
                     )
         elif grade == "PERFECT":
             _apply_perfect_logic(data, person, lecture_id, adaptive_start, prev_grade_entry)
-            reflow_revisions(data, lecture_id)
+            reflow_revisions(data, lecture_id, person=person)
 
     save_ok = save_data(data)
     if not save_ok:
@@ -665,8 +665,12 @@ def grade_revision(data, person, lecture_id, stage, grade):
     print(f"[GitHub] grade verify: {verified}")
 
 
-def reflow_revisions(data, lecture_id):
-    """Reflow only future ungraded standard revisions for a lecture."""
+def reflow_revisions(data, lecture_id, person=None):
+    """Reflow only future ungraded standard revisions for a lecture.
+
+    If person is provided, only that person's graded stages are treated as locked.
+    Otherwise (manual/edit reflows), any person's graded stage is locked.
+    """
     lecture = data["lectures"][lecture_id]
 
     if not data["exam_date"]:
@@ -685,10 +689,15 @@ def reflow_revisions(data, lecture_id):
     for stage, current_date_str in current_dates.items():
         current_date = datetime.strptime(current_date_str, "%Y-%m-%d").date()
         grade_key = f"{lecture_id}_{stage}"
-        stage_has_grade = any(
-            data["persons"].get(person, {}).get("grades", {}).get(grade_key)
-            for person in PERSONS
-        )
+        if person is not None:
+            stage_has_grade = bool(
+                data["persons"].get(person, {}).get("grades", {}).get(grade_key)
+            )
+        else:
+            stage_has_grade = any(
+                data["persons"].get(person_name, {}).get("grades", {}).get(grade_key)
+                for person_name in PERSONS
+            )
 
         if current_date < today or stage_has_grade:
             merged_dates[stage] = current_date_str
