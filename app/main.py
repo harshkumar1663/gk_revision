@@ -975,7 +975,7 @@ def auto_reflow_overdue(data, person):
     3. Apply load-aware reflow for future stages
     4. Respect load limits and exam ceiling
     
-    Use session_state flag to call once per person per session.
+    Returns (count_moved, count_unfixed) tuple for diagnostics
     """
     today = datetime.now().date()
     today_str = format_date_for_storage(today)
@@ -998,7 +998,8 @@ def auto_reflow_overdue(data, person):
                 overdue_revisions.append((lecture_id, stage, overdue_days))
     
     if not overdue_revisions:
-        return  # No overdue revisions
+        print(f"[AutoReflow] No overdue revisions for {person}")
+        return (0, 0)  # No overdue revisions
     
     print(f"[AutoReflow] Detected {len(overdue_revisions)} overdue revision(s) for {person}")
     
@@ -1007,6 +1008,9 @@ def auto_reflow_overdue(data, person):
     
     # Sort by overdue_days descending (most overdue first)
     overdue_revisions.sort(key=lambda x: x[2], reverse=True)
+    
+    count_moved = 0
+    count_unfixed = 0
     
     for lecture_id, stage, overdue_days in overdue_revisions:
         lecture = data["lectures"][lecture_id]
@@ -1046,17 +1050,18 @@ def auto_reflow_overdue(data, person):
             target_date_str = format_date_for_storage(target_date)
             lecture["revision_dates"][stage] = target_date_str
             print(f"[AutoReflow] Moved {lecture_id}_{stage} from overdue to {target_date_str}")
+            count_moved += 1
         else:
             # Fallback: move to tomorrow anyway
             tomorrow_str = format_date_for_storage(today + timedelta(days=1))
             lecture["revision_dates"][stage] = tomorrow_str
             print(f"[AutoReflow] Fallback: moved {lecture_id}_{stage} to tomorrow (load limit exceeded)")
-        
-        # 3. Reflow future stages
-        reflow_revisions(data, lecture_id, person=person)
+            count_unfixed += 1
     
+    # Save all changes once
     save_data(data)
-    print(f"[AutoReflow] Completed recovery for {person}")
+    print(f"[AutoReflow] Completed recovery for {person}: {count_moved} moved, {count_unfixed} unfixed")
+    return (count_moved, count_unfixed)
 
 
 def get_revisions_for_date(data, person, selected_date):
@@ -1169,10 +1174,42 @@ def view_home():
 
     # ── Auto-recover overdue revisions (once per session per person) ──────────
     auto_reflow_key = f"auto_reflow_done_{st.session_state.current_person}"
+    
+    # Debug: Add manual trigger button
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        if st.button("🔄 Trigger Recovery", use_container_width=True):
+            st.session_state[auto_reflow_key] = False  # Reset flag to force rerun
+            st.rerun()
+    
     if auto_reflow_key not in st.session_state:
         data = load_data()  # Fresh load before auto-reflow
-        auto_reflow_overdue(data, st.session_state.current_person)
+        
+        # Count overdue before
+        overdue_before = []
+        for lecture_id, lecture in data["lectures"].items():
+            for stage, date_str in lecture["revision_dates"].items():
+                rev_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                grade_key = f"{lecture_id}_{stage}"
+                grade = data["persons"][st.session_state.current_person]["grades"].get(grade_key)
+                if not grade and rev_date < datetime.now().date():
+                    overdue_days = (datetime.now().date() - rev_date).days
+                    if overdue_days >= OVERDUE_THRESHOLD:
+                        overdue_before.append((lecture_id, stage, overdue_days))
+        
+        if overdue_before:
+            with st.spinner(f"🔄 Recovering {len(overdue_before)} overdue revision(s)..."):
+                moved, unfixed = auto_reflow_overdue(data, st.session_state.current_person)
+        else:
+            moved, unfixed = (0, 0)
+        
         st.session_state[auto_reflow_key] = True
+        
+        if moved > 0 or unfixed > 0:
+            st.success(f"✅ Recovery complete: {moved} rescheduled, {unfixed} fallback")
+        elif overdue_before:
+            st.info(f"ℹ️ Scanned {len(overdue_before)} overdue revision(s)")
+        
         data = load_data()  # Reload after auto-reflow
     else:
         data = load_data()  # Ensure we have latest data
@@ -1261,6 +1298,18 @@ def view_home():
         st.info("🎉 No revisions due today! Well done!")
 
     missed = get_missed_revisions(data, st.session_state.current_person)
+    
+    # Debug diagnostics
+    with st.expander("🔍 System Diagnostics", expanded=False):
+        st.write("**Exam Date:**", data.get("exam_date", "Not set"))
+        soft, hard = get_load_limits(data)
+        st.write(f"**Load Limits:** Soft={soft}, Hard={hard}")
+        st.write(f"**Overdue Threshold:** {OVERDUE_THRESHOLD} days")
+        
+        # Show current load for today
+        today_str = format_date_for_storage(datetime.now().date())
+        today_load = calculate_daily_load(data, today_str, st.session_state.current_person)
+        st.write(f"**Today's Load ({today_str}):** {today_load}")
 
     if missed:
         st.warning(f"⚠️ **{len(missed)} missed revision(s):**")
