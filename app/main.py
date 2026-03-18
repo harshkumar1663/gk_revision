@@ -60,6 +60,24 @@ REVISION_RATIOS = {
     "R7": 0.90
 }
 
+# Load Balancing System
+STAGE_WEIGHTS = {
+    "R1": 1.4,
+    "R2": 1.3,
+    "R3": 1.2,
+    "R4": 1.0,
+    "R5": 0.9,
+    "R6": 0.8,
+    "R7": 0.7
+}
+
+SOFT_LOAD_LIMIT = 10
+HARD_LOAD_LIMIT = 14
+EMERGENCY_LOAD_MULTIPLIER = 1.5
+NORMAL_LOAD_MULTIPLIER = 1.0
+OVERDUE_THRESHOLD = 4
+EXAM_COMPRESSION_THRESHOLD = 45  # days until exam
+
 GRADES = ["FAIL", "PARTIAL", "PERFECT", "SKIP"]
 PERSONS = ["Harsh", "Divya"]
 CATEGORIES = ["History", "Geography", "Polity", "Economy", "Science", "Current Affairs", "Miscellaneous"]
@@ -99,6 +117,122 @@ def format_date_compact(date_str):
 def format_date_for_storage(date_obj):
     """Convert date object to YYYY-MM-DD for storage"""
     return date_obj.strftime("%Y-%m-%d")
+
+# ========================
+# LOAD BALANCING HELPERS
+# ========================
+def calculate_daily_load(data, date_str, person):
+    """Calculate total cognitive load for a specific date for a person.
+    
+    Load = difficulty × stage_weight × multiplier (1.5 for emergency, 1.0 for normal)
+    """
+    total_load = 0.0
+    person_data = data["persons"].get(person, {})
+    emergency_revisions = person_data.get("emergency_revisions", {})
+    
+    target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    
+    # Standard revisions
+    for lecture_id, lecture in data["lectures"].items():
+        for stage, rev_date_str in lecture["revision_dates"].items():
+            revision_date = datetime.strptime(rev_date_str, "%Y-%m-%d").date()
+            grade_key = f"{lecture_id}_{stage}"
+            grade = person_data["grades"].get(grade_key)
+            
+            if revision_date == target_date and not grade:
+                weight = STAGE_WEIGHTS.get(stage, 1.0)
+                load = lecture["difficulty"] * weight * NORMAL_LOAD_MULTIPLIER
+                total_load += load
+    
+    # Emergency revisions
+    lecture_prefix_map = {lid: lec for lid, lec in data["lectures"].items()}
+    for emergency_key, rev_date_str in emergency_revisions.items():
+        if not emergency_key.endswith("_emergency"):
+            continue
+        
+        revision_date = datetime.strptime(rev_date_str, "%Y-%m-%d").date()
+        if revision_date != target_date:
+            continue
+        
+        grade = person_data["grades"].get(emergency_key)
+        if grade:
+            continue
+        
+        # Extract lecture_id from emergency_key
+        parts = emergency_key.rsplit("_", 2)  # Split from right: lecture_id, stage, "emergency"
+        if len(parts) >= 2:
+            lecture_id = "_".join(parts[:-2])  # Handle lecture IDs with underscores
+            base_stage = parts[-2]
+            lecture = lecture_prefix_map.get(lecture_id, {})
+            weight = STAGE_WEIGHTS.get(base_stage, 1.0)
+            load = lecture.get("difficulty", 3) * weight * EMERGENCY_LOAD_MULTIPLIER
+            total_load += load
+    
+    return round(total_load, 2)
+
+
+def get_load_limits(data):
+    """Get adjusted load limits based on exam proximity."""
+    exam_date = data.get("exam_date")
+    if not exam_date:
+        return SOFT_LOAD_LIMIT, HARD_LOAD_LIMIT
+    
+    days_until_exam = (datetime.strptime(exam_date, "%Y-%m-%d").date() - datetime.now().date()).days
+    
+    if days_until_exam < EXAM_COMPRESSION_THRESHOLD:
+        soft = SOFT_LOAD_LIMIT * 1.15
+        hard = HARD_LOAD_LIMIT * 1.20
+        return round(soft, 2), round(hard, 2)
+    
+    return SOFT_LOAD_LIMIT, HARD_LOAD_LIMIT
+
+
+def try_shift_revision_forward(data, person, lecture_id, stage, original_date_str, max_shift_days=5):
+    """Attempt to shift a revision forward to reduce daily load.
+    
+    Returns new date_str if successful, or original_date_str if no valid shift found.
+    Never shifts beyond exam date, emergency revisions, or graded stages.
+    """
+    exam_date = data.get("exam_date")
+    if not exam_date:
+        return original_date_str
+    
+    exam_date_obj = datetime.strptime(exam_date, "%Y-%m-%d").date()
+    original_date = datetime.strptime(original_date_str, "%Y-%m-%d").date()
+    
+    # Can't shift to or beyond exam
+    if original_date >= exam_date_obj:
+        return original_date_str
+    
+    _, hard_limit = get_load_limits(data)
+    
+    # Try shifting forward 1-5 days
+    for shift_days in range(1, max_shift_days + 1):
+        test_date = original_date + timedelta(days=shift_days)
+        
+        # Don't exceed exam date
+        if test_date > exam_date_obj:
+            break
+        
+        test_date_str = format_date_for_storage(test_date)
+        
+        # Calculate projected load if we move this revision to test_date
+        projected_load = calculate_daily_load(data, test_date_str, person)
+        
+        # Temporarily add this revision's load
+        lecture = data["lectures"][lecture_id]
+        weight = STAGE_WEIGHTS.get(stage, 1.0)
+        revision_load = lecture["difficulty"] * weight * NORMAL_LOAD_MULTIPLIER
+        projected_load += revision_load
+        
+        # If within limits, accept this shift
+        if projected_load <= hard_limit:
+            print(f"[LoadBalance] Shifted {lecture_id}_{stage} from {original_date_str} to {test_date_str} (projected load: {projected_load})")
+            return test_date_str
+    
+    # No valid shift found
+    return original_date_str
+
 
 # Initialize session state
 if "current_person" not in st.session_state:
@@ -588,9 +722,12 @@ def grade_revision(data, person, lecture_id, stage, grade):
     adaptive_start = data.get("adaptive_start_date", today_str)
     adaptive_active = data.get("adaptive_grading_enabled", True) and today_str >= adaptive_start
 
+    print(f"[Grade] {person}: {lecture['name']} {base_stage} → {grade} (adaptive={adaptive_active})")
+
     if grade == "SKIP" and adaptive_active:
         skip_counts = person_data.setdefault("skip_counts", {})
         skip_counts[lecture_id] = skip_counts.get(lecture_id, 0) + 1
+        print(f"[Grade] Skip count for {lecture_id}: {skip_counts[lecture_id]}")
 
         if is_emergency:
             current_date_str = emergency_revisions.get(emergency_grade_key)
@@ -602,8 +739,10 @@ def grade_revision(data, person, lecture_id, stage, grade):
             if current_date_str:
                 new_date = datetime.strptime(current_date_str, "%Y-%m-%d") + timedelta(days=1)
                 lecture["revision_dates"][base_stage] = format_date_for_storage(new_date)
+                print(f"[Grade] Postponed {base_stage} by 1 day")
 
         if skip_counts[lecture_id] >= 3:
+            print(f"[Grade] Skip limit reached (3), applying FAIL logic")
             prev_grade_entry = person_data["grades"].get(previous_grade_key)
             skip_counts[lecture_id] = 0
             if is_emergency:
@@ -630,10 +769,12 @@ def grade_revision(data, person, lecture_id, stage, grade):
 
     if adaptive_active:
         if grade == "FAIL":
+            print(f"[Grade] Applying FAIL logic: tightening & emergency revision")
             person_data.setdefault("skip_counts", {})[lecture_id] = 0
             _apply_fail_logic(data, person, lecture_id, base_stage, today_str, adaptive_start, prev_grade_entry)
             reflow_revisions(data, lecture_id, person=person)
         elif grade == "PARTIAL":
+            print(f"[Grade] Applying PARTIAL logic: tightening next stage")
             stage_order = ["R1", "R2", "R3", "R4", "R5", "R6", "R7"]
             next_stage = None
             _apply_partial_logic(data, lecture_id, base_stage)
@@ -657,6 +798,7 @@ def grade_revision(data, person, lecture_id, stage, grade):
                         today + timedelta(days=new_days)
                     )
         elif grade == "PERFECT":
+            print(f"[Grade] Applying PERFECT logic: relaxing interval multiplier")
             _apply_perfect_logic(data, person, lecture_id, adaptive_start, prev_grade_entry)
             reflow_revisions(data, lecture_id, person=person)
 
@@ -683,10 +825,12 @@ def grade_revision(data, person, lecture_id, stage, grade):
 
 
 def reflow_revisions(data, lecture_id, person=None):
-    """Reflow only future ungraded standard revisions for a lecture.
+    """Reflow only future ungraded standard revisions for a lecture with load balancing.
 
     If person is provided, only that person's graded stages are treated as locked.
     Otherwise (manual/edit reflows), any person's graded stage is locked.
+    
+    Load-aware: attempts to shift revisions forward if daily load exceeds HARD_LIMIT.
     """
     lecture = data["lectures"][lecture_id]
 
@@ -726,6 +870,43 @@ def reflow_revisions(data, lecture_id, person=None):
     for stage, new_date_str in recalculated_dates.items():
         if stage not in merged_dates:
             merged_dates[stage] = new_date_str
+
+    # ── Load-aware placement for pending revisions ────────────────────────────
+    # For each person, check if new dates cause overload and attempt shifts
+    if person is not None:
+        persons_to_check = [person]
+    else:
+        persons_to_check = PERSONS
+
+    for check_person in persons_to_check:
+        _, hard_limit = get_load_limits(data)
+        
+        for stage, placed_date_str in list(merged_dates.items()):
+            placed_date = datetime.strptime(placed_date_str, "%Y-%m-%d").date()
+            grade_key = f"{lecture_id}_{stage}"
+            
+            # Skip graded or past stages
+            if any(
+                data["persons"].get(pn, {}).get("grades", {}).get(grade_key)
+                for pn in PERSONS
+            ) or placed_date < today:
+                continue
+            
+            # Check daily load for this person
+            daily_load = calculate_daily_load(data, placed_date_str, check_person)
+            
+            if daily_load > hard_limit:
+                print(f"[Reflow] Load overload on {placed_date_str} for {check_person}: {daily_load:.1f} > {hard_limit}")
+                # Try to shift this revision forward
+                shifted_date_str = try_shift_revision_forward(
+                    dict(data),  # Pass a copy to avoid modifying data during test
+                    check_person,
+                    lecture_id,
+                    stage,
+                    placed_date_str,
+                    max_shift_days=5
+                )
+                merged_dates[stage] = shifted_date_str
 
     lecture["revision_dates"] = {
         stage: merged_dates[stage]
@@ -783,6 +964,99 @@ def recalculate_pending_revisions(data, lecture_id):
             del emergency_map[key]
 
     return save_data(data)
+
+
+def auto_reflow_overdue(data, person):
+    """Auto-recover overdue revisions by strategically redistributing them.
+    
+    For each ungraded non-emergency revision overdue by >= OVERDUE_THRESHOLD days:
+    1. Move to tomorrow
+    2. Tighten interval multiplier based on overdue severity
+    3. Apply load-aware reflow for future stages
+    4. Respect load limits and exam ceiling
+    
+    Use session_state flag to call once per person per session.
+    """
+    today = datetime.now().date()
+    today_str = format_date_for_storage(today)
+    person_data = data["persons"].get(person, {})
+    
+    overdue_revisions = []  # [(lecture_id, stage, overdue_days), ...]
+    
+    # Scan for overdue ungraded standard revisions
+    for lecture_id, lecture in data["lectures"].items():
+        for stage, date_str in lecture["revision_dates"].items():
+            revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            grade_key = f"{lecture_id}_{stage}"
+            grade = person_data["grades"].get(grade_key)
+            
+            if grade or revision_date >= today:
+                continue
+            
+            overdue_days = (today - revision_date).days
+            if overdue_days >= OVERDUE_THRESHOLD:
+                overdue_revisions.append((lecture_id, stage, overdue_days))
+    
+    if not overdue_revisions:
+        return  # No overdue revisions
+    
+    print(f"[AutoReflow] Detected {len(overdue_revisions)} overdue revision(s) for {person}")
+    
+    # ── Avalanche Protection: Distribute across next few days ────────────────
+    _, hard_limit = get_load_limits(data)
+    
+    # Sort by overdue_days descending (most overdue first)
+    overdue_revisions.sort(key=lambda x: x[2], reverse=True)
+    
+    for lecture_id, stage, overdue_days in overdue_revisions:
+        lecture = data["lectures"][lecture_id]
+        
+        # 1. Apply tightening factor
+        tightening_factor = max(0.7, 1.0 - min(0.15, overdue_days * 0.02))
+        lecture["interval_multiplier"] = round(lecture.get("interval_multiplier", 1.0) * tightening_factor, 4)
+        print(f"[AutoReflow] Tightened {lecture_id} multiplier to {lecture['interval_multiplier']}")
+        
+        # 2. Find earliest available slot (tomorrow onwards, respecting load limits)
+        earliest_slot = today + timedelta(days=1)
+        exam_date = data.get("exam_date")
+        if exam_date:
+            exam_date_obj = datetime.strptime(exam_date, "%Y-%m-%d").date()
+        else:
+            exam_date_obj = None
+        
+        # Try up to 10 days ahead
+        target_date = None
+        for day_offset in range(1, 11):
+            test_date = today + timedelta(days=day_offset)
+            
+            if exam_date_obj and test_date > exam_date_obj:
+                break
+            
+            test_date_str = format_date_for_storage(test_date)
+            projected_load = calculate_daily_load(data, test_date_str, person)
+            
+            weight = STAGE_WEIGHTS.get(stage, 1.0)
+            revision_load = lecture["difficulty"] * weight * NORMAL_LOAD_MULTIPLIER
+            
+            if projected_load + revision_load <= hard_limit:
+                target_date = test_date
+                break
+        
+        if target_date:
+            target_date_str = format_date_for_storage(target_date)
+            lecture["revision_dates"][stage] = target_date_str
+            print(f"[AutoReflow] Moved {lecture_id}_{stage} from overdue to {target_date_str}")
+        else:
+            # Fallback: move to tomorrow anyway
+            tomorrow_str = format_date_for_storage(today + timedelta(days=1))
+            lecture["revision_dates"][stage] = tomorrow_str
+            print(f"[AutoReflow] Fallback: moved {lecture_id}_{stage} to tomorrow (load limit exceeded)")
+        
+        # 3. Reflow future stages
+        reflow_revisions(data, lecture_id, person=person)
+    
+    save_data(data)
+    print(f"[AutoReflow] Completed recovery for {person}")
 
 
 def get_revisions_for_date(data, person, selected_date):
@@ -870,6 +1144,7 @@ def view_home():
                 for lecture_id in data["lectures"].keys():
                     reflow_revisions(data, lecture_id)
                 st.success("Exam date updated! All revisions reflowed.")
+                data = load_data()  # Reload after changes
     
     with col2:
         st.metric("Days Until Exam", 
@@ -892,6 +1167,16 @@ def view_home():
     
     st.subheader(f"Revisions for {st.session_state.current_person}")
 
+    # ── Auto-recover overdue revisions (once per session per person) ──────────
+    auto_reflow_key = f"auto_reflow_done_{st.session_state.current_person}"
+    if auto_reflow_key not in st.session_state:
+        data = load_data()  # Fresh load before auto-reflow
+        auto_reflow_overdue(data, st.session_state.current_person)
+        st.session_state[auto_reflow_key] = True
+        data = load_data()  # Reload after auto-reflow
+    else:
+        data = load_data()  # Ensure we have latest data
+    
     todays = get_todays_revisions(data, st.session_state.current_person)
 
     if todays:
