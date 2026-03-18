@@ -735,6 +735,56 @@ def reflow_revisions(data, lecture_id, person=None):
     save_data(data)
 
 
+def recalculate_pending_revisions(data, lecture_id):
+    """Reset only pending standard revisions to baseline schedule for a lecture.
+
+    Completed stage dates are preserved. Pending stages are recalculated from
+    study_date + difficulty + exam ceiling with interval_multiplier reset to 1.0.
+    """
+    lecture = data["lectures"].get(lecture_id)
+    if not lecture or not data.get("exam_date"):
+        return False
+
+    current_dates = lecture.get("revision_dates", {})
+    baseline_dates = calculate_revision_dates(
+        lecture["study_date"],
+        data["exam_date"],
+        lecture["difficulty"],
+        1.0
+    )
+
+    merged_dates = {}
+    for stage in REVISION_RATIOS:
+        current_date = current_dates.get(stage)
+        stage_key = f"{lecture_id}_{stage}"
+        stage_completed = any(
+            data["persons"].get(person_name, {}).get("grades", {}).get(stage_key)
+            for person_name in PERSONS
+        )
+
+        if stage_completed and current_date:
+            merged_dates[stage] = current_date
+        elif stage in baseline_dates:
+            merged_dates[stage] = baseline_dates[stage]
+
+    lecture["revision_dates"] = merged_dates
+    lecture["interval_multiplier"] = 1.0
+
+    # Clear pending emergency revisions for this lecture after manual reset.
+    lecture_prefix = f"{lecture_id}_"
+    for person_name in PERSONS:
+        person_data = data["persons"].get(person_name, {})
+        emergency_map = person_data.get("emergency_revisions", {})
+        keys_to_remove = [
+            key for key in emergency_map.keys()
+            if key.startswith(lecture_prefix) and key.endswith("_emergency")
+        ]
+        for key in keys_to_remove:
+            del emergency_map[key]
+
+    return save_data(data)
+
+
 def get_revisions_for_date(data, person, selected_date):
     """Get all revisions scheduled for a specific date for a person, including emergencies."""
     revisions = []
@@ -1271,6 +1321,20 @@ def view_revision_plan():
                                 st.success("🗑️ Lecture deleted!")
                                 st.rerun()
                         
+                        st.divider()
+
+                        if st.button(
+                            "♻️ Recalculate Pending Revisions",
+                            key=f"recalc_pending_{lecture_id}_{st.session_state.current_person}",
+                            use_container_width=True
+                        ):
+                            recalc_ok = recalculate_pending_revisions(data, lecture_id)
+                            if recalc_ok:
+                                st.success("Pending revisions reset to baseline schedule. Completed stages were preserved.")
+                            else:
+                                st.error("Could not recalculate pending revisions right now. Please try again.")
+                            st.rerun()
+
                         st.divider()
                         
                         # Revision stages in a grid layout
