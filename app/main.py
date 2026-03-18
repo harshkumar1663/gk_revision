@@ -1175,12 +1175,28 @@ def view_home():
     # ── Auto-recover overdue revisions (once per session per person) ──────────
     auto_reflow_key = f"auto_reflow_done_{st.session_state.current_person}"
     
-    # Debug: Add manual trigger button
-    col1, col2 = st.columns([3, 1])
-    with col2:
-        if st.button("🔄 Trigger Recovery", use_container_width=True):
+    # Debug: Manual trigger button and diagnostics
+    col1, col2, col3 = st.columns([1, 1, 2])
+    with col1:
+        if st.button("🔄 Recovery", use_container_width=True, help="Manually trigger overdue recovery"):
             st.session_state[auto_reflow_key] = False  # Reset flag to force rerun
             st.rerun()
+    
+    with col2:
+        if st.button("📊 Diagnostics", use_container_width=True, help="Show system info"):
+            st.session_state['show_diagnostics'] = not st.session_state.get('show_diagnostics', False)
+            st.rerun()
+    
+    if st.session_state.get('show_diagnostics', False):
+        data = load_data()
+        with col3:
+            st.write("")
+        soft, hard = get_load_limits(data)
+        today_str = format_date_for_storage(datetime.now().date())
+        today_load = calculate_daily_load(data, today_str, st.session_state.current_person)
+        st.info(f"📊 Load: {today_load}/{hard} | Exam: {data.get('exam_date', 'N/A')} | Threshold: {OVERDUE_THRESHOLD}d")
+    
+    st.divider()
     
     if auto_reflow_key not in st.session_state:
         data = load_data()  # Fresh load before auto-reflow
@@ -1298,18 +1314,6 @@ def view_home():
         st.info("🎉 No revisions due today! Well done!")
 
     missed = get_missed_revisions(data, st.session_state.current_person)
-    
-    # Debug diagnostics
-    with st.expander("🔍 System Diagnostics", expanded=False):
-        st.write("**Exam Date:**", data.get("exam_date", "Not set"))
-        soft, hard = get_load_limits(data)
-        st.write(f"**Load Limits:** Soft={soft}, Hard={hard}")
-        st.write(f"**Overdue Threshold:** {OVERDUE_THRESHOLD} days")
-        
-        # Show current load for today
-        today_str = format_date_for_storage(datetime.now().date())
-        today_load = calculate_daily_load(data, today_str, st.session_state.current_person)
-        st.write(f"**Today's Load ({today_str}):** {today_load}")
 
     if missed:
         st.warning(f"⚠️ **{len(missed)} missed revision(s):**")
