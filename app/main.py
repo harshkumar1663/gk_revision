@@ -76,7 +76,7 @@ GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/con
 
 # Date formatting helpers
 def get_grade_value(grade_entry):
-    """Extract grade string from either legacy string format or new dict format."""
+    """Extract grade string from either legacy   string format or new dict format."""
     if isinstance(grade_entry, dict):
         return grade_entry.get("grade", "")
     return grade_entry or ""
@@ -976,11 +976,22 @@ def view_home():
         st.info("🎉 No revisions due today! Well done!")
 
     missed = get_missed_revisions(data, st.session_state.current_person)
+    total_missed = len(missed)
 
-    if missed:
-        st.warning(f"⚠️ **{len(missed)} missed revision(s):**")
+    if total_missed >= 5:
+        display_missed = missed[:3]
+        remaining = total_missed - 3
+        st.warning(
+            "⚠ Recovery Mode Active — Showing 3 most critical overdue revisions.\n"
+            f"{remaining} additional overdue revisions hidden."
+        )
+    else:
+        display_missed = missed
 
-        for idx, rev in enumerate(missed):
+    if display_missed:
+        st.warning(f"⚠️ **{total_missed} missed revision(s):**")
+
+        for idx, rev in enumerate(display_missed):
             with st.expander(f"{rev['lecture_name']} - {rev['stage']} ({rev['overdue_days']} days overdue)"):
                 if rev.get("is_emergency"):
                     st.markdown('<span class="emergency-chip">EMERGENCY REVISION</span>', unsafe_allow_html=True)
