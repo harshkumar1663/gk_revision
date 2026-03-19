@@ -850,7 +850,7 @@ def view_home():
     st.title("🏠 Today's Revisions")
     
     data = load_data()
-    
+    apply_overdue_auto_fail(data, st.session_state.current_person)
     # Exam Date at top
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -1385,6 +1385,32 @@ def view_revision_plan():
                                                 grade_revision(data, st.session_state.current_person,
                                                              lecture_id, stage, "PERFECT")
                                                 st.rerun()
+
+
+def apply_overdue_auto_fail(data, person):
+    today = datetime.now().date()
+    person_data = data["persons"][person]
+
+    for lecture_id, lecture in data["lectures"].items():
+        overdue_candidates = []
+
+        for stage, date_str in lecture["revision_dates"].items():
+            revision_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            grade_key = f"{lecture_id}_{stage}"
+
+            # Skip already graded
+            if person_data["grades"].get(grade_key):
+                continue
+
+            overdue_days = (today - revision_date).days
+
+            if overdue_days > 7:
+                overdue_candidates.append((stage, overdue_days))
+
+        if overdue_candidates:
+            # Fail only the most overdue stage
+            stage_to_fail = sorted(overdue_candidates, key=lambda x: -x[1])[0][0]
+            grade_revision(data, person, lecture_id, stage_to_fail, "FAIL")
 
 
 # =======================
