@@ -14,41 +14,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Fix sidebar collapse button visibility issue
-st.markdown("""
-    <style>
-        /* Force sidebar controls to always render */
-        [data-testid="collapsedControl"] {
-            display: flex !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-        }
-        
-        /* Ensure sidebar button is always visible */
-        section[data-testid="stSidebar"] button[kind="header"] {
-            display: flex !important;
-        }
-        
-        /* Force sidebar to render properly */
-        section[data-testid="stSidebar"] {
-            min-height: 100vh;
-        }
-
-        /* High-visibility marker for emergency revisions */
-        .emergency-chip {
-            display: inline-block;
-            background: #ff3b30;
-            color: #ffffff;
-            font-weight: 700;
-            font-size: 12px;
-            letter-spacing: 0.4px;
-            padding: 4px 10px;
-            border-radius: 999px;
-            margin-bottom: 8px;
-        }
-    </style>
-""", unsafe_allow_html=True)
-
 # Constants
 REVISION_RATIOS = {
     "R1": 0.03,
@@ -106,6 +71,201 @@ if "current_person" not in st.session_state:
 
 if "current_view" not in st.session_state:
     st.session_state.current_view = "Home"
+
+if "theme_mode" not in st.session_state:
+    st.session_state.theme_mode = "Light"
+
+
+def get_theme_tokens(theme_mode):
+    """Return color tokens for the active UI mode."""
+    if theme_mode == "Dark":
+        return {
+            "app_bg": "#0f1524",
+            "app_surface": "#1a2334",
+            "app_surface_alt": "#223047",
+            "sidebar_bg": "#0b1220",
+            "text_main": "#e9eef7",
+            "text_muted": "#a8b3c7",
+            "border": "#304463",
+            "accent": "#3fa7ff",
+            "accent_soft": "#163a5a",
+            "success": "#22c55e",
+            "warning": "#f59e0b",
+            "danger": "#ef4444",
+            "shadow": "0 10px 26px rgba(0, 0, 0, 0.35)"
+        }
+
+    return {
+        "app_bg": "#f4f7fb",
+        "app_surface": "#ffffff",
+        "app_surface_alt": "#eef3fb",
+        "sidebar_bg": "#e9f0fb",
+        "text_main": "#12223a",
+        "text_muted": "#4e637f",
+        "border": "#d5dfec",
+        "accent": "#0f6cbd",
+        "accent_soft": "#dceaff",
+        "success": "#138a4b",
+        "warning": "#b76e00",
+        "danger": "#c7362f",
+        "shadow": "0 10px 28px rgba(15, 29, 53, 0.10)"
+    }
+
+
+def apply_theme(theme_mode):
+    """Inject CSS that adapts the UI for light/dark modes."""
+    theme = get_theme_tokens(theme_mode)
+    st.markdown(
+        f"""
+        <style>
+            :root {{
+                --app-bg: {theme['app_bg']};
+                --app-surface: {theme['app_surface']};
+                --app-surface-alt: {theme['app_surface_alt']};
+                --sidebar-bg: {theme['sidebar_bg']};
+                --text-main: {theme['text_main']};
+                --text-muted: {theme['text_muted']};
+                --border-color: {theme['border']};
+                --accent: {theme['accent']};
+                --accent-soft: {theme['accent_soft']};
+                --success: {theme['success']};
+                --warning: {theme['warning']};
+                --danger: {theme['danger']};
+                --elev-shadow: {theme['shadow']};
+            }}
+
+            .stApp {{
+                background:
+                    radial-gradient(circle at 5% 5%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 30%),
+                    radial-gradient(circle at 95% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 34%),
+                    var(--app-bg);
+                color: var(--text-main);
+            }}
+
+            .stApp [data-testid="stMarkdownContainer"],
+            .stApp p,
+            .stApp label,
+            .stApp h1,
+            .stApp h2,
+            .stApp h3,
+            .stApp h4 {{
+                color: var(--text-main) !important;
+            }}
+
+            .stApp [data-testid="stCaptionContainer"] p,
+            .stApp [data-testid="stMetricDelta"] {{
+                color: var(--text-muted) !important;
+            }}
+
+            /* Sidebar controls remain visible and themed */
+            [data-testid="collapsedControl"] {{
+                display: flex !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+            }}
+
+            section[data-testid="stSidebar"] button[kind="header"] {{
+                display: flex !important;
+            }}
+
+            section[data-testid="stSidebar"] {{
+                min-height: 100vh;
+                background: linear-gradient(180deg, var(--sidebar-bg), color-mix(in srgb, var(--sidebar-bg) 82%, #000 18%));
+                border-right: 1px solid var(--border-color);
+            }}
+
+            section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
+                padding-top: 0.5rem;
+            }}
+
+            .stApp [data-testid="stMetric"] {{
+                border: 1px solid var(--border-color);
+                border-radius: 14px;
+                background: linear-gradient(180deg, var(--app-surface), var(--app-surface-alt));
+                box-shadow: var(--elev-shadow);
+                padding: 0.5rem 0.75rem;
+            }}
+
+            .stApp [data-testid="stExpander"] {{
+                border: 1px solid var(--border-color);
+                border-radius: 14px;
+                background: var(--app-surface);
+                box-shadow: var(--elev-shadow);
+            }}
+
+            .stApp [data-testid="stAlert"] {{
+                border-radius: 12px;
+                border: 1px solid var(--border-color);
+                background: var(--app-surface);
+            }}
+
+            .stApp div[data-testid="stForm"] {{
+                border: 1px solid var(--border-color);
+                border-radius: 14px;
+                background: var(--app-surface);
+                box-shadow: var(--elev-shadow);
+                padding: 1rem;
+            }}
+
+            .stApp [data-baseweb="input"] > div,
+            .stApp [data-baseweb="select"] > div,
+            .stApp [data-baseweb="textarea"] > div,
+            .stApp [data-baseweb="select"] div[role="combobox"] {{
+                background: var(--app-surface-alt) !important;
+                border-color: var(--border-color) !important;
+                color: var(--text-main) !important;
+            }}
+
+            .stApp .stDateInput input,
+            .stApp .stTextInput input,
+            .stApp .stNumberInput input,
+            .stApp textarea {{
+                color: var(--text-main) !important;
+            }}
+
+            .stApp .stButton > button,
+            .stApp .stDownloadButton > button,
+            .stApp button[kind="primary"] {{
+                border-radius: 10px;
+                border: 1px solid var(--border-color);
+                font-weight: 600;
+                transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+            }}
+
+            .stApp button[kind="primary"] {{
+                background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 78%, #000 22%));
+                color: #ffffff;
+                border-color: color-mix(in srgb, var(--accent) 70%, #000 30%);
+            }}
+
+            .stApp .stButton > button:hover,
+            .stApp .stDownloadButton > button:hover,
+            .stApp button[kind="primary"]:hover {{
+                transform: translateY(-1px);
+                box-shadow: var(--elev-shadow);
+                border-color: var(--accent);
+            }}
+
+            .stApp [data-testid="stDivider"] {{
+                border-color: var(--border-color);
+            }}
+
+            /* High-visibility marker for emergency revisions */
+            .emergency-chip {{
+                display: inline-block;
+                background: var(--danger);
+                color: #ffffff;
+                font-weight: 700;
+                font-size: 12px;
+                letter-spacing: 0.4px;
+                padding: 4px 10px;
+                border-radius: 999px;
+                margin-bottom: 8px;
+            }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _default_data():
@@ -1386,6 +1546,16 @@ def main():
     # Sidebar navigation - force sidebar rendering
     with st.sidebar:
         st.title("📚 SSC GK Tracker")
+
+        dark_mode = st.toggle(
+            "Dark Mode",
+            value=st.session_state.theme_mode == "Dark",
+            key="theme_toggle",
+            help="Switch between light and dark UI"
+        )
+        st.session_state.theme_mode = "Dark" if dark_mode else "Light"
+        st.caption(f"Theme: {st.session_state.theme_mode}")
+        st.divider()
         
         view = st.radio(
             "Navigation",
@@ -1395,6 +1565,8 @@ def main():
         
         st.divider()
         st.caption("Built with ❤️ for SSC GK preparation")
+
+    apply_theme(st.session_state.theme_mode)
     
     if view == "🏠 Home / Today":
         view_home()
