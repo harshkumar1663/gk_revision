@@ -980,16 +980,13 @@ def view_home():
 
     if total_missed >= 5:
         display_missed = missed[:3]
-        remaining = total_missed - 3
-        st.warning(
-            "⚠ Recovery Mode Active — Showing 3 most critical overdue revisions.\n"
-            f"{remaining} additional overdue revisions hidden."
-        )
+        st.warning("⚠ Recovery Mode Active — Showing 3 most critical overdue revisions.")
     else:
         display_missed = missed
 
     if display_missed:
-        st.warning(f"⚠️ **{total_missed} missed revision(s):**")
+        if total_missed < 5:
+            st.warning(f"⚠️ **{total_missed} missed revision(s):**")
 
         for idx, rev in enumerate(display_missed):
             with st.expander(f"{rev['lecture_name']} - {rev['stage']} ({rev['overdue_days']} days overdue)"):
