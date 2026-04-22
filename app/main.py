@@ -892,46 +892,6 @@ def view_home():
     
     st.subheader(f"Revisions for {st.session_state.current_person}")
 
-    if st.checkbox("Show debug tools", key="show_debug_tools_home"):
-        with st.container(border=True):
-            st.caption("Temporary recovery actions")
-            st.warning("Force-fail will run the existing auto-fail + reschedule flow on ALL overdue pending revisions (both persons).")
-
-            if st.button("Force-Fail All Overdue Pending Revisions", key="debug_force_fail_overdue"):
-                stats = {
-                    "processed": 0,
-                    "skipped": 0,
-                    "errors": 0,
-                    "targeted": 0,
-                }
-
-                for person in PERSONS:
-                    person_stats = apply_overdue_auto_fail(
-                        data,
-                        person,
-                        threshold_days=0,
-                        fail_all=True,
-                    )
-                    stats["processed"] += person_stats["processed"]
-                    stats["skipped"] += person_stats["skipped"]
-                    stats["errors"] += person_stats["errors"]
-                    stats["targeted"] += person_stats["targeted"]
-
-                save_data(data)
-
-                if stats["errors"]:
-                    st.error(
-                        "Force-fail completed with errors: "
-                        f"processed={stats['processed']}, skipped={stats['skipped']}, errors={stats['errors']}"
-                    )
-                else:
-                    st.success(
-                        "Force-fail completed: "
-                        f"processed={stats['processed']}, skipped={stats['skipped']}"
-                    )
-                st.info(f"Targets considered (existing auto-fail flow): {stats['targeted']}")
-                st.rerun()
-
     todays = get_todays_revisions(data, st.session_state.current_person)
 
     if todays:
@@ -1016,19 +976,11 @@ def view_home():
         st.info("🎉 No revisions due today! Well done!")
 
     missed = get_missed_revisions(data, st.session_state.current_person)
-    total_missed = len(missed)
 
-    if total_missed >= 5:
-        display_missed = missed[:3]
-        st.warning("⚠ Recovery Mode Active — Showing 3 most critical overdue revisions.")
-    else:
-        display_missed = missed
+    if missed:
+        st.warning(f"⚠️ **{len(missed)} missed revision(s):**")
 
-    if display_missed:
-        if total_missed < 5:
-            st.warning(f"⚠️ **{total_missed} missed revision(s):**")
-
-        for idx, rev in enumerate(display_missed):
+        for idx, rev in enumerate(missed):
             with st.expander(f"{rev['lecture_name']} - {rev['stage']} ({rev['overdue_days']} days overdue)"):
                 if rev.get("is_emergency"):
                     st.markdown('<span class="emergency-chip">EMERGENCY REVISION</span>', unsafe_allow_html=True)
@@ -1098,6 +1050,7 @@ def view_home():
                             "SKIP"
                         )
                     )
+
 
 # =======================
 # VIEW: Add Lecture
@@ -1426,15 +1379,9 @@ def view_revision_plan():
                                                 st.rerun()
 
 
-def apply_overdue_auto_fail(data, person, threshold_days=7, fail_all=False):
+def apply_overdue_auto_fail(data, person):
     today = datetime.now().date()
     person_data = data["persons"][person]
-    stats = {
-        "processed": 0,
-        "skipped": 0,
-        "errors": 0,
-        "targeted": 0,
-    }
 
     for lecture_id, lecture in data["lectures"].items():
         overdue_candidates = []
@@ -1449,37 +1396,13 @@ def apply_overdue_auto_fail(data, person, threshold_days=7, fail_all=False):
 
             overdue_days = (today - revision_date).days
 
-            if overdue_days > threshold_days:
+            if overdue_days > 7:
                 overdue_candidates.append((stage, overdue_days))
 
         if overdue_candidates:
-            overdue_candidates.sort(key=lambda x: -x[1])
-
-            if fail_all:
-                stages_to_fail = [stage for stage, _ in overdue_candidates]
-            else:
-                # Default behavior: fail only the most overdue stage.
-                stages_to_fail = [overdue_candidates[0][0]]
-
-            stats["targeted"] += len(stages_to_fail)
-
-            for stage_to_fail in stages_to_fail:
-                grade_key = f"{lecture_id}_{stage_to_fail}"
-                if person_data["grades"].get(grade_key):
-                    stats["skipped"] += 1
-                    continue
-
-                try:
-                    grade_revision(data, person, lecture_id, stage_to_fail, "FAIL")
-                    stats["processed"] += 1
-                except Exception as exc:
-                    stats["errors"] += 1
-                    print(
-                        f"[AutoFail] error person={person} lecture={lecture_id} "
-                        f"stage={stage_to_fail}: {exc}"
-                    )
-
-    return stats
+            # Fail only the most overdue stage
+            stage_to_fail = sorted(overdue_candidates, key=lambda x: -x[1])[0][0]
+            grade_revision(data, person, lecture_id, stage_to_fail, "FAIL")
 
 
 # =======================
