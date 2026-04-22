@@ -892,6 +892,28 @@ def view_home():
     
     st.subheader(f"Revisions for {st.session_state.current_person}")
 
+    if st.checkbox("Show debug tools", key="show_debug_tools_home"):
+        with st.container(border=True):
+            st.caption("Temporary recovery actions")
+            st.warning("Force-fail will mark ALL overdue pending revisions (both persons) as FAIL.")
+
+            if st.button("Force-Fail All Overdue Pending Revisions", key="debug_force_fail_overdue"):
+                stats = force_fail_all_overdue_pending(data, min_overdue_days=1, persons=PERSONS)
+                save_data(data)
+
+                if stats["errors"]:
+                    st.error(
+                        "Force-fail completed with errors: "
+                        f"processed={stats['processed']}, skipped={stats['skipped']}, errors={stats['errors']}"
+                    )
+                else:
+                    st.success(
+                        "Force-fail completed: "
+                        f"processed={stats['processed']}, skipped={stats['skipped']}"
+                    )
+                st.info(f"Targets considered: {stats['targeted']}")
+                st.rerun()
+
     todays = get_todays_revisions(data, st.session_state.current_person)
 
     if todays:
@@ -1058,28 +1080,6 @@ def view_home():
                             "SKIP"
                         )
                     )
-
-    with st.expander("🔧 Debug Tools", expanded=False):
-        st.caption("Temporary recovery action for backlog situations.")
-        st.warning("This will mark ALL overdue pending revisions (both persons) as FAIL.")
-
-        if st.button("Force-Fail All Overdue Pending Revisions", key="debug_force_fail_overdue"):
-            stats = force_fail_all_overdue_pending(data, min_overdue_days=1, persons=PERSONS)
-            save_data(data)
-
-            if stats["errors"]:
-                st.error(
-                    "Force-fail completed with errors: "
-                    f"processed={stats['processed']}, skipped={stats['skipped']}, errors={stats['errors']}"
-                )
-            else:
-                st.success(
-                    "Force-fail completed: "
-                    f"processed={stats['processed']}, skipped={stats['skipped']}"
-                )
-            st.info(f"Targets considered: {stats['targeted']}")
-            st.rerun()
-
 
 # =======================
 # VIEW: Add Lecture
