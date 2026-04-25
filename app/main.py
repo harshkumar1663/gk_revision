@@ -979,7 +979,8 @@ def view_home():
     total_missed = len(missed)
 
     if total_missed >= 5:
-        display_missed = missed[:3]
+        # display_missed = missed[:3]
+        display_missed = missed
         st.warning("⚠ Recovery Mode Active — Showing 3 most critical overdue revisions.")
     else:
         display_missed = missed
