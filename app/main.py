@@ -62,7 +62,21 @@ REVISION_RATIOS = {
 
 GRADES = ["FAIL", "PARTIAL", "PERFECT", "SKIP"]
 PERSONS = ["Harsh", "Divya"]
-CATEGORIES = ["History", "Geography", "Polity", "Economy", "Science", "Current Affairs", "Miscellaneous"]
+CATEGORIES = [
+    "Ancient History",
+    "Medieval History",
+    "Modern History",
+    "Geography",
+    "Polity",
+    "Economy",
+    "Science",
+    "Current Affairs",
+    "Miscellaneous"
+]
+
+LEGACY_CATEGORY_ALIASES = {
+    "History": "Ancient History"
+}
 
 # Use relative path for data file (works both locally and on Streamlit Cloud)
 DATA_FILE = Path(__file__).parent.parent / "gk_data.json"
@@ -117,6 +131,10 @@ def _default_data():
             "Divya": {"grades": {}, "emergency_revisions": {}}
         }
     }
+
+
+def _normalize_category(category):
+    return LEGACY_CATEGORY_ALIASES.get(category, category)
 
 
 def _github_headers():
@@ -210,6 +228,10 @@ def load_data():
         needs_save = True
 
     for lecture in data.get("lectures", {}).values():
+        normalized_category = _normalize_category(lecture.get("category"))
+        if normalized_category != lecture.get("category"):
+            lecture["category"] = normalized_category
+            needs_save = True
         if "interval_multiplier" not in lecture:
             lecture["interval_multiplier"] = 1.0
             needs_save = True
@@ -1234,13 +1256,17 @@ def view_revision_plan():
     # Group lectures by category
     lectures_by_category = {}
     for lecture_id, lecture in data["lectures"].items():
-        category = lecture["category"]
+        category = _normalize_category(lecture["category"])
         if category not in lectures_by_category:
             lectures_by_category[category] = []
         lectures_by_category[category].append((lecture_id, lecture))
     
     # Create tabs for each category
-    categories_present = sorted(lectures_by_category.keys())
+    category_order = {category: index for index, category in enumerate(CATEGORIES)}
+    categories_present = sorted(
+        lectures_by_category.keys(),
+        key=lambda category: category_order.get(category, len(category_order))
+    )
     
     if categories_present:
         tabs = st.tabs([f"📂 {cat.upper()}" for cat in categories_present])
@@ -1285,8 +1311,11 @@ def view_revision_plan():
                             
                             with col2:
                                 edit_difficulty = st.slider("Difficulty", 1, 5, lecture["difficulty"], key=f"diff_{lecture_id}")
+                                current_category = _normalize_category(lecture["category"])
+                                if current_category not in CATEGORIES:
+                                    current_category = CATEGORIES[0]
                                 edit_category = st.selectbox("Category", CATEGORIES, 
-                                                            index=CATEGORIES.index(lecture["category"]),
+                                                            index=CATEGORIES.index(current_category),
                                                             key=f"cat_{lecture_id}")
                             
                             with col3:
