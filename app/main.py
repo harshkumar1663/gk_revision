@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 import json
 import os
 import time
-import html
 from pathlib import Path
 import base64
 import requests
@@ -18,228 +17,6 @@ st.set_page_config(
 # Fix sidebar collapse button visibility issue
 st.markdown("""
     <style>
-        :root {
-            --mac-bg: rgba(18, 18, 22, 0.72);
-            --mac-surface: rgba(255, 255, 255, 0.08);
-            --mac-surface-strong: rgba(255, 255, 255, 0.14);
-            --mac-border: rgba(255, 255, 255, 0.16);
-            --mac-text: #f5f7fb;
-            --mac-muted: rgba(245, 247, 251, 0.72);
-            --mac-shadow: 0 22px 60px rgba(0, 0, 0, 0.24);
-        }
-
-        [data-testid="stAppViewContainer"] {
-            background:
-                radial-gradient(circle at top right, rgba(131, 177, 255, 0.22), transparent 30%),
-                radial-gradient(circle at top left, rgba(255, 166, 0, 0.12), transparent 24%),
-                linear-gradient(180deg, #0f1117 0%, #171a22 48%, #11141a 100%);
-        }
-
-        [data-testid="stHeader"] {
-            background: transparent;
-        }
-
-        section.main > div {
-            animation: macFadeIn 420ms ease-out both;
-        }
-
-        .stButton > button,
-        .stFormSubmitButton > button,
-        [data-testid="stExpander"],
-        [data-testid="stMetric"],
-        .stRadio [role="radiogroup"] label {
-            transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease, border-color 180ms ease;
-        }
-
-        .stButton > button:hover,
-        .stFormSubmitButton > button:hover,
-        [data-testid="stExpander"]:hover {
-            transform: translateY(-1px);
-        }
-
-        .stAlert {
-            border-radius: 18px;
-            backdrop-filter: blur(18px);
-        }
-
-        .emergency-chip {
-            display: inline-block;
-            background: #ff3b30;
-            color: #ffffff;
-            font-weight: 700;
-            font-size: 12px;
-            letter-spacing: 0.4px;
-            padding: 4px 10px;
-            border-radius: 999px;
-            margin-bottom: 8px;
-            box-shadow: 0 10px 24px rgba(255, 59, 48, 0.28);
-        }
-
-        .mac-toast-stack {
-            position: fixed;
-            top: 0.95rem;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 999999;
-            width: min(520px, calc(100vw - 1.2rem));
-            pointer-events: none;
-        }
-
-        .mac-toast {
-            pointer-events: auto;
-            display: flex;
-            align-items: center;
-            gap: 0.85rem;
-            width: fit-content;
-            min-width: 232px;
-            max-width: 520px;
-            margin: 0 auto;
-            padding: 0.8rem 0.95rem;
-            border-radius: 999px;
-            border: 1px solid var(--mac-border);
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06));
-            color: var(--mac-text);
-            box-shadow: var(--mac-shadow);
-            backdrop-filter: blur(28px) saturate(150%);
-            -webkit-backdrop-filter: blur(28px) saturate(150%);
-            transform-origin: top center;
-            animation: macToastEnter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
-            overflow: hidden;
-        }
-
-        .mac-toast__dot {
-            width: 0.72rem;
-            height: 0.72rem;
-            border-radius: 999px;
-            flex: 0 0 auto;
-        }
-
-        .mac-toast__content {
-            display: grid;
-            gap: 0.14rem;
-            min-width: 0;
-        }
-
-        .mac-toast__title {
-            font-size: 0.95rem;
-            font-weight: 700;
-            line-height: 1.2;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .mac-toast__message {
-            max-height: 0;
-            opacity: 0;
-            transform: translateY(-2px);
-            margin-top: 0;
-            color: var(--mac-muted);
-            font-size: 0.86rem;
-            line-height: 1.35;
-            transition: max-height 220ms ease, opacity 180ms ease, transform 180ms ease, margin-top 180ms ease;
-            overflow: hidden;
-        }
-
-        .mac-toast:hover {
-            width: min(520px, calc(100vw - 1.2rem));
-            padding: 0.95rem 1.05rem;
-            border-radius: 26px;
-        }
-
-        .mac-toast:hover .mac-toast__title {
-            white-space: normal;
-        }
-
-        .mac-toast:hover .mac-toast__message {
-            max-height: 3.5rem;
-            opacity: 1;
-            transform: translateY(0);
-            margin-top: 0.16rem;
-        }
-
-        .mac-toast::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            pointer-events: none;
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), transparent 34%, transparent 66%, rgba(255, 255, 255, 0.06));
-            opacity: 0.55;
-        }
-
-        .mac-toast {
-            position: relative;
-        }
-
-        .mac-toast[data-variant="success"] {
-            background: linear-gradient(180deg, rgba(52, 199, 89, 0.22), rgba(17, 20, 26, 0.88));
-        }
-
-        .mac-toast[data-variant="success"] .mac-toast__dot {
-            background: #34c759;
-            box-shadow: 0 0 0 6px rgba(52, 199, 89, 0.16);
-        }
-
-        .mac-toast[data-variant="info"] {
-            background: linear-gradient(180deg, rgba(10, 132, 255, 0.22), rgba(17, 20, 26, 0.88));
-        }
-
-        .mac-toast[data-variant="info"] .mac-toast__dot {
-            background: #0a84ff;
-            box-shadow: 0 0 0 6px rgba(10, 132, 255, 0.16);
-        }
-
-        .mac-toast[data-variant="warning"] {
-            background: linear-gradient(180deg, rgba(255, 159, 10, 0.24), rgba(17, 20, 26, 0.88));
-        }
-
-        .mac-toast[data-variant="warning"] .mac-toast__dot {
-            background: #ff9f0a;
-            box-shadow: 0 0 0 6px rgba(255, 159, 10, 0.18);
-        }
-
-        .mac-toast[data-variant="error"] {
-            background: linear-gradient(180deg, rgba(255, 69, 58, 0.24), rgba(17, 20, 26, 0.88));
-        }
-
-        .mac-toast[data-variant="error"] .mac-toast__dot {
-            background: #ff453a;
-            box-shadow: 0 0 0 6px rgba(255, 69, 58, 0.18);
-        }
-
-        @keyframes macFadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(8px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        @keyframes macToastEnter {
-            from {
-                opacity: 0;
-                transform: translate3d(0, -14px, 0) scale(0.96);
-                filter: blur(4px);
-            }
-            to {
-                opacity: 1;
-                transform: translate3d(0, 0, 0) scale(1);
-                filter: blur(0);
-            }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after {
-                animation-duration: 0.01ms !important;
-                animation-iteration-count: 1 !important;
-                transition-duration: 0.01ms !important;
-                scroll-behavior: auto !important;
-            }
-        }
-
         /* Force sidebar controls to always render */
         [data-testid="collapsedControl"] {
             display: flex !important;
@@ -255,6 +32,19 @@ st.markdown("""
         /* Force sidebar to render properly */
         section[data-testid="stSidebar"] {
             min-height: 100vh;
+        }
+
+        /* High-visibility marker for emergency revisions */
+        .emergency-chip {
+            display: inline-block;
+            background: #ff3b30;
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 12px;
+            letter-spacing: 0.4px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            margin-bottom: 8px;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -323,49 +113,6 @@ def format_date_compact(date_str):
 def format_date_for_storage(date_obj):
     """Convert date object to YYYY-MM-DD for storage"""
     return date_obj.strftime("%Y-%m-%d")
-
-
-def _ensure_ui_state():
-    if "ui_toasts" not in st.session_state:
-        st.session_state.ui_toasts = []
-
-
-def queue_toast(title, message, kind="success", duration=4.2):
-    _ensure_ui_state()
-    st.session_state.ui_toasts.append({
-        "title": title,
-        "message": message,
-        "kind": kind,
-        "created_at": time.time(),
-        "duration": duration,
-    })
-
-
-def render_toasts():
-    _ensure_ui_state()
-    now = time.time()
-    active_toasts = [toast for toast in st.session_state.ui_toasts if now - toast["created_at"] <= toast["duration"]]
-    st.session_state.ui_toasts = active_toasts
-
-    if not active_toasts:
-        return
-
-    toast = active_toasts[-1]
-    variant = toast.get("kind", "info")
-    title = html.escape(str(toast.get("title", "")))
-    message = html.escape(str(toast.get("message", "")))
-    st.markdown(
-        f'<div class="mac-toast-stack">'
-        f'<div class="mac-toast" data-variant="{variant}">'
-        f'<div class="mac-toast__dot"></div>'
-        f'<div class="mac-toast__content">'
-        f'<div class="mac-toast__title">{title}</div>'
-        f'<div class="mac-toast__message">{message}</div>'
-        f'</div>'
-        f'</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
 
 # Initialize session state
 if "current_person" not in st.session_state:
@@ -862,7 +609,6 @@ def grade_revision(data, person, lecture_id, stage, grade):
     previous_grade_key = standard_grade_key if is_emergency else storage_grade_key
     adaptive_start = data.get("adaptive_start_date", today_str)
     adaptive_active = data.get("adaptive_grading_enabled", True) and today_str >= adaptive_start
-    stage_label = f"{lecture.get('name', 'Lecture')} • {base_stage}{' (Emergency)' if is_emergency else ''}"
 
     if grade == "SKIP" and adaptive_active:
         skip_counts = person_data.setdefault("skip_counts", {})
@@ -895,18 +641,6 @@ def grade_revision(data, person, lecture_id, stage, grade):
             fresh_person["emergency_revisions"] = person_data["emergency_revisions"]
             fresh_person["skip_counts"] = person_data.get("skip_counts", {})
             save_ok = save_data(fresh_data)
-        if save_ok:
-            queue_toast(
-                "Revision skipped",
-                f"{stage_label} was deferred by one day.",
-                kind="info",
-            )
-        else:
-            queue_toast(
-                "Could not save skip",
-                f"{stage_label} could not be persisted right now.",
-                kind="warning",
-            )
         return
 
     prev_grade_entry = person_data["grades"].get(previous_grade_key)
@@ -968,25 +702,6 @@ def grade_revision(data, person, lecture_id, stage, grade):
                 break
             time.sleep(0.4)
     print(f"[GitHub] grade verify: {verified}")
-
-    if save_ok:
-        toast_kind = "success" if verified else "warning"
-        toast_title = {
-            "FAIL": "Revision marked as FAIL",
-            "PARTIAL": "Revision marked as PARTIAL",
-            "PERFECT": "Revision completed",
-        }.get(grade, "Revision saved")
-        queue_toast(
-            toast_title,
-            f"{stage_label} has been updated.",
-            kind=toast_kind,
-        )
-    else:
-        queue_toast(
-            "Save failed",
-            f"{stage_label} could not be synchronized.",
-            kind="error",
-        )
 
 
 def reflow_revisions(data, lecture_id, person=None):
@@ -1177,7 +892,6 @@ def view_home():
                 for lecture_id in data["lectures"].keys():
                     reflow_revisions(data, lecture_id)
                 st.success("Exam date updated! All revisions reflowed.")
-                queue_toast("Exam date updated", "All lectures were reflowed against the new exam date.", kind="success")
     
     with col2:
         st.metric("Days Until Exam", 
@@ -1379,7 +1093,6 @@ def view_add_lecture():
     
     if not data["exam_date"]:
         st.error("⚠️ Please set an exam date in the Home view first!")
-        queue_toast("Set exam date first", "Add an exam date from the Home view before adding lectures.", kind="warning")
         return
     
     exam_date = datetime.strptime(data["exam_date"], "%Y-%m-%d")
@@ -1387,7 +1100,6 @@ def view_add_lecture():
     
     if days_until_exam < 30:
         st.error("❌ Cannot add lectures in the last 30 days before exam!")
-        queue_toast("Lecture blocked", "Lectures cannot be added in the last 30 days before the exam.", kind="error")
         return
     
     with st.form("add_lecture_form"):
@@ -1408,7 +1120,6 @@ def view_add_lecture():
         if submitted:
             if not lecture_name:
                 st.error("Please enter a lecture name!")
-                queue_toast("Missing lecture name", "Type a lecture name before submitting.", kind="warning")
             else:
                 # Create unique lecture ID
                 lecture_id = f"lecture_{datetime.now().timestamp()}"
@@ -1433,11 +1144,6 @@ def view_add_lecture():
                 save_data(data)
                 st.success(f"✅ Lecture '{lecture_name}' added for both Harsh and Divya!")
                 st.info(f"📅 Generated {len(revision_dates)} revision stages: {', '.join(revision_dates.keys())}")
-                queue_toast(
-                    "Lecture added",
-                    f"{lecture_name} scheduled with {len(revision_dates)} revision stages.",
-                    kind="success",
-                )
 
 
 # =======================
@@ -1507,11 +1213,6 @@ def view_daily_schedule():
                             grade_key = f"{rev['lecture_id']}_{rev['stage']}"
                             del data["persons"][st.session_state.current_person]["grades"][grade_key]
                             save_data(data)
-                            queue_toast(
-                                "Revision reopened",
-                                f"{rev['lecture_name']} • {rev['stage']} is pending again.",
-                                kind="info",
-                            )
                             st.rerun()
                     else:
                         # Not graded - show mark as complete
@@ -1550,7 +1251,6 @@ def view_revision_plan():
     
     if not data["lectures"]:
         st.info("No lectures added yet. Go to 'Add Lecture' to get started!")
-        queue_toast("No lectures yet", "Use Add Lecture to create the first revision block.", kind="info")
         return
     
     # Group lectures by category
@@ -1645,11 +1345,6 @@ def view_revision_plan():
                                     # Reflow revisions for both persons
                                     reflow_revisions(data, lecture_id)
                                     st.success("✅ Lecture updated and revisions reflowed!")
-                                    queue_toast(
-                                        "Lecture updated",
-                                        f"{edit_name} has been reflowed for both persons.",
-                                        kind="success",
-                                    )
                                     st.rerun()
                             
                             if delete_lecture:
@@ -1662,7 +1357,6 @@ def view_revision_plan():
                                         del data["persons"][person]["grades"][k]
                                 save_data(data)
                                 st.success("🗑️ Lecture deleted!")
-                                queue_toast("Lecture deleted", f"{lecture['name']} was removed from the schedule.", kind="warning")
                                 st.rerun()
                         
                         st.divider()
@@ -1675,18 +1369,8 @@ def view_revision_plan():
                             recalc_ok = recalculate_pending_revisions(data, lecture_id)
                             if recalc_ok:
                                 st.success("Pending revisions reset to baseline schedule. Completed stages were preserved.")
-                                queue_toast(
-                                    "Pending revisions recalculated",
-                                    f"{lecture['name']} returned to its baseline schedule.",
-                                    kind="success",
-                                )
                             else:
                                 st.error("Could not recalculate pending revisions right now. Please try again.")
-                                queue_toast(
-                                    "Recalculation failed",
-                                    f"{lecture['name']} could not be recalculated right now.",
-                                    kind="error",
-                                )
                             st.rerun()
 
                         st.divider()
@@ -1719,11 +1403,6 @@ def view_revision_plan():
                                                 # Undo: restore date
                                                 del data["persons"][st.session_state.current_person]["grades"][grade_key]
                                                 save_data(data)
-                                                queue_toast(
-                                                    "Revision reopened",
-                                                    f"{lecture['name']} • {stage} is pending again.",
-                                                    kind="info",
-                                                )
                                                 st.rerun()
                                         else:
                                             # Pending - show date
@@ -1789,8 +1468,6 @@ def main():
         view_daily_schedule()
     elif view == "📋 Full Revision Plan":
         view_revision_plan()
-
-    render_toasts()
 
 
 if __name__ == "__main__":
