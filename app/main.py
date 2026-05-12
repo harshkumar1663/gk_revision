@@ -705,23 +705,18 @@ def grade_revision(data, person, lecture_id, stage, grade):
 
 
 def reflow_revisions(data, lecture_id, person=None):
-    """Reflow all revision stages for a lecture, recalculating all dates from scratch.
+    """Reflow only future ungraded standard revisions for a lecture.
 
-    Regenerates all R1-R7 dates based purely on:
-    - study_date
-    - exam_date
-    - difficulty
-    - interval_multiplier
-
-    Grades are preserved separately (stored as lecture_id_stage keys).
-    Does NOT call save_data() — caller must save after reflowing all lectures.
+    If person is provided, only that person's graded stages are treated as locked.
+    Otherwise (manual/edit reflows), any person's graded stage is locked.
     """
     lecture = data["lectures"][lecture_id]
 
     if not data["exam_date"]:
         return
 
-    # Completely regenerate all revision dates
+    today = datetime.now().date()
+    current_dates = lecture.get("revision_dates", {})
     recalculated_dates = calculate_revision_dates(
         lecture["study_date"],
         data["exam_date"],
@@ -729,8 +724,37 @@ def reflow_revisions(data, lecture_id, person=None):
         lecture.get("interval_multiplier", 1.0)
     )
 
-    # Replace all revision dates with newly calculated ones
-    lecture["revision_dates"] = recalculated_dates
+    merged_dates = {}
+    for stage, current_date_str in current_dates.items():
+        current_date = datetime.strptime(current_date_str, "%Y-%m-%d").date()
+        grade_key = f"{lecture_id}_{stage}"
+        if person is not None:
+            stage_has_grade = bool(
+                data["persons"].get(person, {}).get("grades", {}).get(grade_key)
+            )
+        else:
+            stage_has_grade = any(
+                data["persons"].get(person_name, {}).get("grades", {}).get(grade_key)
+                for person_name in PERSONS
+            )
+
+        if current_date < today or stage_has_grade:
+            merged_dates[stage] = current_date_str
+        elif stage in recalculated_dates:
+            merged_dates[stage] = recalculated_dates[stage]
+        else:
+            merged_dates[stage] = current_date_str
+
+    for stage, new_date_str in recalculated_dates.items():
+        if stage not in merged_dates:
+            merged_dates[stage] = new_date_str
+
+    lecture["revision_dates"] = {
+        stage: merged_dates[stage]
+        for stage in REVISION_RATIOS
+        if stage in merged_dates
+    }
+    save_data(data)
 
 
 def recalculate_pending_revisions(data, lecture_id):
@@ -781,226 +805,6 @@ def recalculate_pending_revisions(data, lecture_id):
             del emergency_map[key]
 
     return save_data(data)
-
-
-def global_balance(data, person):
-    """Global load balancing scheduler for a single person.
-
-    - Collects all pending revisions (today, missed, future ungraded, emergencies)
-    - Prioritizes by emergency, overdue days, and stage weight
-    - Redistributes revisions starting today with max 6/day up to exam_date
-    - Preserves any completed/graded revisions (by any person)
-    """
-    if not data or not data.get("exam_date"):
-        return False
-
-    today = datetime.now().date()
-    exam_date = datetime.strptime(data["exam_date"], "%Y-%m-%d").date()
-    if today > exam_date:
-        return False
-
-    person_data = data["persons"].setdefault(person, {"grades": {}, "emergency_revisions": {}})
-
-    # NOTE: `lecture["revision_dates"]` are shared across persons.
-    # Future improvement: move revision_dates to per-person storage to avoid cross-person side-effects.
-
-    # Stage weights
-    stage_weights = {
-        "R1": 10,
-        "R2": 9,
-        "R3": 8,
-        "R4": 6,
-        "R5": 4,
-        "R6": 2,
-        "R7": 1
-    }
-
-    pending = []  # items to schedule
-    pending_standard_keys = set()
-    pending_emergency_keys = set()
-
-    # Collect pending standard revisions (skip any stage that has a grade by ANY person)
-    for lecture_id, lecture in data.get("lectures", {}).items():
-        for stage, date_str in lecture.get("revision_dates", {}).items():
-            grade_key = f"{lecture_id}_{stage}"
-            # If any person has graded this stage, preserve it
-            stage_completed = any(
-                data["persons"].get(p, {}).get("grades", {}).get(grade_key)
-                for p in PERSONS
-            )
-            if stage_completed:
-                continue
-
-            # Pending standard stage
-            try:
-                scheduled_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-            except Exception:
-                scheduled_date = today
-
-            overdue_days = max(0, (today - scheduled_date).days)
-            # Priority: stage weight emphasized to favor early stages
-            priority = 0
-            priority += overdue_days * 3
-            priority += stage_weights.get(stage, 0) * 2
-
-            pending.append({
-                "lecture_id": lecture_id,
-                "stage": stage,
-                "is_emergency": False,
-                "priority": priority,
-                "current_date": scheduled_date
-            })
-            pending_standard_keys.add(grade_key)
-
-    # Collect pending emergencies for this person. Deduplicate multiple emergencies per lecture.
-    emergency_map = person_data.setdefault("emergency_revisions", {})
-    emerg_by_lecture = {}
-    for ekey, date_str in list(emergency_map.items()):
-        if not ekey.endswith("_emergency"):
-            continue
-        # split base to get lecture_id and stage
-        base = ekey[:-len("_emergency")]
-        if "_" not in base:
-            continue
-        lecture_id_part, base_stage = base.rsplit("_", 1)
-        lecture_id = lecture_id_part
-
-        # If this emergency is already graded for this person, treat as locked
-        if person_data.get("grades", {}).get(ekey):
-            continue
-
-        emerg_by_lecture.setdefault(lecture_id, []).append((ekey, date_str, base_stage))
-
-    for lecture_id, entries in emerg_by_lecture.items():
-        # choose earliest emergency date to keep
-        entries_sorted = sorted(entries, key=lambda x: x[1])
-        chosen_key, chosen_date_str, chosen_stage = entries_sorted[0]
-        try:
-            scheduled_date = datetime.strptime(chosen_date_str, "%Y-%m-%d").date()
-        except Exception:
-            scheduled_date = today
-
-        overdue_days = max(0, (today - scheduled_date).days)
-        # Emergency bonus plus overdue and stage weight (stage weight doubled)
-        priority = 0
-        priority += 100
-        priority += overdue_days * 3
-        priority += stage_weights.get(chosen_stage, 0) * 2
-
-        pending.append({
-            "lecture_id": lecture_id,
-            "stage": chosen_stage,
-            "is_emergency": True,
-            "priority": priority,
-            "current_date": scheduled_date,
-            "emergency_key": chosen_key
-        })
-        pending_emergency_keys.add(chosen_key)
-
-        # Remove duplicate emergency keys for the same lecture (keep only chosen)
-        for other in entries_sorted[1:]:
-            other_key = other[0]
-            # Only remove if not graded
-            if other_key in emergency_map and not person_data.get("grades", {}).get(other_key):
-                try:
-                    del emergency_map[other_key]
-                except KeyError:
-                    pass
-
-    # Baseline occupancy: count all scheduled revisions for this person that are NOT pending
-    # If nothing pending, bail out early
-    if not pending:
-        return False
-    occupancy = {}
-
-    def _inc_occupancy(d):
-        occupancy[d] = occupancy.get(d, 0) + 1
-
-    for lecture_id, lecture in data.get("lectures", {}).items():
-        for stage, date_str in lecture.get("revision_dates", {}).items():
-            grade_key = f"{lecture_id}_{stage}"
-            if grade_key in pending_standard_keys:
-                continue
-            try:
-                d = datetime.strptime(date_str, "%Y-%m-%d").date()
-            except Exception:
-                continue
-            _inc_occupancy(d)
-
-    for ekey, date_str in emergency_map.items():
-        if ekey in pending_emergency_keys:
-            continue
-        try:
-            d = datetime.strptime(date_str, "%Y-%m-%d").date()
-        except Exception:
-            continue
-        _inc_occupancy(d)
-
-    # Sort pending by priority descending (higher -> schedule earlier)
-    pending.sort(key=lambda x: -x["priority"])
-
-    # Sequentially assign pending items starting today, max 6/day, clamp to exam_date
-    for item in pending:
-        assign_date = None
-        d = today
-        while d <= exam_date:
-            if occupancy.get(d, 0) < 6:
-                assign_date = d
-                break
-            d = d + timedelta(days=1)
-
-        if assign_date is None:
-            # no free day found — place on exam_date (clamp)
-            assign_date = exam_date
-
-        new_date_str = format_date_for_storage(assign_date)
-
-        if item.get("is_emergency"):
-            # Update emergency mapping for person
-            emergency_map[item["emergency_key"]] = new_date_str
-        else:
-            # Update lecture revision date (shared across persons) only for pending stages
-            lecture = data.get("lectures", {}).get(item["lecture_id"])
-            if lecture and item["stage"] in lecture.get("revision_dates", {}):
-                lecture["revision_dates"][item["stage"]] = new_date_str
-
-        _inc_occupancy(assign_date)
-
-    # Save changes
-    save_data(data)
-    return True
-
-
-def get_backlog_count(data, person):
-    """Return count of missed + overdue + pending revisions for a person."""
-    if not data or not data.get("exam_date"):
-        return 0
-
-    today = datetime.now().date()
-    person_data = data["persons"].get(person, {})
-    count = 0
-
-    # Count standard revisions
-    for lecture_id, lecture in data.get("lectures", {}).items():
-        for stage, date_str in lecture.get("revision_dates", {}).items():
-            grade_key = f"{lecture_id}_{stage}"
-            # skip if graded for this person
-            if person_data.get("grades", {}).get(grade_key):
-                continue
-            try:
-                d = datetime.strptime(date_str, "%Y-%m-%d").date()
-            except Exception:
-                d = today
-            if d < today:
-                count += 1
-        
-    # Count emergency revisions for this person (only ungraded)
-    for ekey, date_str in person_data.get("emergency_revisions", {}).items():
-        if person_data.get("grades", {}).get(ekey):
-            continue
-        count += 1
-
-    return count
 
 
 def get_revisions_for_date(data, person, selected_date):
@@ -1083,19 +887,11 @@ def view_home():
             new_exam_date = format_date_for_storage(exam_date_input)
             if data["exam_date"] != new_exam_date:
                 data["exam_date"] = new_exam_date
-
-                # Full ecosystem reflow: regenerate ALL revision dates from scratch
+                save_data(data)
+                # Reflow all lectures
                 for lecture_id in data["lectures"].keys():
                     reflow_revisions(data, lecture_id)
-
-                # Globally rebalance schedules for both persons
-                for person in PERSONS:
-                    global_balance(data, person)
-
-                # Save once after all reflowing and balancing
-                save_data(data)
-
-                st.success("Exam date updated! Entire revision ecosystem rebalanced.")
+                st.success("Exam date updated! All revisions reflowed.")
     
     with col2:
         st.metric("Days Until Exam", 
@@ -1117,13 +913,6 @@ def view_home():
             st.rerun()
     
     st.subheader(f"Revisions for {st.session_state.current_person}")
-    if st.button("⚖️ Fix Schedule"):
-        try:
-            global_balance(data, st.session_state.current_person)
-            st.success("Schedule optimized!")
-            st.rerun()
-        except Exception:
-            st.error("Could not optimize schedule right now.")
 
     todays = get_todays_revisions(data, st.session_state.current_person)
 
@@ -1645,8 +1434,7 @@ def apply_overdue_auto_fail(data, person):
 
             overdue_days = (today - revision_date).days
 
-            # softened threshold to avoid aggressive auto-fails (was >7)
-            if overdue_days > 13:
+            if overdue_days > 7:
                 overdue_candidates.append((stage, overdue_days))
 
         if overdue_candidates:
