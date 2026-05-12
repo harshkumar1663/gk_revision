@@ -631,7 +631,7 @@ def grade_revision(data, person, lecture_id, stage, grade):
             if is_emergency:
                 emergency_revisions.pop(emergency_grade_key, None)
             _apply_fail_logic(data, person, lecture_id, base_stage, today_str, adaptive_start, prev_grade_entry)
-            reflow_revisions(data, lecture_id)
+            reflow_revisions(data, lecture_id, person=person)
 
         save_ok = save_data(data)
         if not save_ok:
@@ -654,12 +654,12 @@ def grade_revision(data, person, lecture_id, stage, grade):
         if grade == "FAIL":
             person_data.setdefault("skip_counts", {})[lecture_id] = 0
             _apply_fail_logic(data, person, lecture_id, base_stage, today_str, adaptive_start, prev_grade_entry)
-            reflow_revisions(data, lecture_id)
+            reflow_revisions(data, lecture_id, person=person)
         elif grade == "PARTIAL":
             stage_order = ["R1", "R2", "R3", "R4", "R5", "R6", "R7"]
             next_stage = None
             _apply_partial_logic(data, lecture_id, base_stage)
-            reflow_revisions(data, lecture_id)
+            reflow_revisions(data, lecture_id, person=person)
             if base_stage in stage_order:
                 current_idx = stage_order.index(base_stage)
                 if current_idx + 1 < len(stage_order):
@@ -680,7 +680,7 @@ def grade_revision(data, person, lecture_id, stage, grade):
                     )
         elif grade == "PERFECT":
             _apply_perfect_logic(data, person, lecture_id, adaptive_start, prev_grade_entry)
-            reflow_revisions(data, lecture_id)
+            reflow_revisions(data, lecture_id, person=person)
 
     save_ok = save_data(data)
     if not save_ok:
@@ -704,98 +704,57 @@ def grade_revision(data, person, lecture_id, stage, grade):
     print(f"[GitHub] grade verify: {verified}")
 
 
-def reflow_revisions(data, lecture_id):
-    """State-aware rebuild for a lecture.
+def reflow_revisions(data, lecture_id, person=None):
+    """Reflow only future ungraded standard revisions for a lecture.
 
-    - Completed stages (graded by any person) keep their stored dates.
-    - Pending stages are rebuilt as future workload from today to exam date.
-    - Grade state remains independent in persons.grades.
+    If person is provided, only that person's graded stages are treated as locked.
+    Otherwise (manual/edit reflows), any person's graded stage is locked.
     """
     lecture = data["lectures"][lecture_id]
 
     if not data["exam_date"]:
         return
 
-    exam_date = datetime.strptime(data["exam_date"], "%Y-%m-%d").date()
     today = datetime.now().date()
     current_dates = lecture.get("revision_dates", {})
+    recalculated_dates = calculate_revision_dates(
+        lecture["study_date"],
+        data["exam_date"],
+        lecture["difficulty"],
+        lecture.get("interval_multiplier", 1.0)
+    )
 
-    if not current_dates:
-        current_dates = calculate_revision_dates(
-            lecture["study_date"],
-            data["exam_date"],
-            lecture["difficulty"],
-            lecture.get("interval_multiplier", 1.0)
-        )
-
-    # Split stages into completed vs pending based on grade existence.
-    completed_dates = {}
-    pending_stages = []
-    for stage in REVISION_RATIOS:
-        if stage not in current_dates:
-            continue
-
+    merged_dates = {}
+    for stage, current_date_str in current_dates.items():
+        current_date = datetime.strptime(current_date_str, "%Y-%m-%d").date()
         grade_key = f"{lecture_id}_{stage}"
-        stage_completed = any(
-            data["persons"].get(person_name, {}).get("grades", {}).get(grade_key)
-            for person_name in PERSONS
-        )
-
-        if stage_completed:
-            completed_dates[stage] = current_dates[stage]
+        if person is not None:
+            stage_has_grade = bool(
+                data["persons"].get(person, {}).get("grades", {}).get(grade_key)
+            )
         else:
-            pending_stages.append(stage)
+            stage_has_grade = any(
+                data["persons"].get(person_name, {}).get("grades", {}).get(grade_key)
+                for person_name in PERSONS
+            )
 
-    # Rebuild pending stages as future workload between today and exam date.
-    pending_dates = {}
-    if pending_stages:
-        difficulty_factor = 1.0 + (3 - lecture["difficulty"]) * 0.15
-        multiplier = lecture.get("interval_multiplier", 1.0)
-        horizon_days = max(0, (exam_date - today).days)
-        effective_horizon = max(0, int(horizon_days * difficulty_factor * multiplier))
+        if current_date < today or stage_has_grade:
+            merged_dates[stage] = current_date_str
+        elif stage in recalculated_dates:
+            merged_dates[stage] = recalculated_dates[stage]
+        else:
+            merged_dates[stage] = current_date_str
 
-        pending_ratios = [REVISION_RATIOS[stage] for stage in pending_stages]
-        min_ratio = min(pending_ratios)
-        max_ratio = max(pending_ratios)
-        ratio_span = max_ratio - min_ratio
+    for stage, new_date_str in recalculated_dates.items():
+        if stage not in merged_dates:
+            merged_dates[stage] = new_date_str
 
-        for stage in pending_stages:
-            ratio = REVISION_RATIOS[stage]
-            if ratio_span <= 0:
-                normalized = 1.0
-            else:
-                normalized = (ratio - min_ratio) / ratio_span
-
-            days_offset = int(effective_horizon * normalized)
-            candidate_date = today + timedelta(days=days_offset)
-            if candidate_date > exam_date:
-                candidate_date = exam_date
-
-            pending_dates[stage] = format_date_for_storage(candidate_date)
-
-    rebuilt_dates = {}
-    for stage in REVISION_RATIOS:
-        if stage in completed_dates:
-            rebuilt_dates[stage] = completed_dates[stage]
-        elif stage in pending_dates:
-            rebuilt_dates[stage] = pending_dates[stage]
-
-    lecture["revision_dates"] = rebuilt_dates
-
-
-def clear_pending_emergencies(data):
-    """Remove only ungraded emergency revisions after major timeline rebuilds."""
-    for person_name in PERSONS:
-        person_data = data.get("persons", {}).get(person_name, {})
-        emergency_map = person_data.get("emergency_revisions", {})
-        grades_map = person_data.get("grades", {})
-
-        to_delete = [
-            key for key in emergency_map
-            if not grades_map.get(key)
-        ]
-        for key in to_delete:
-            del emergency_map[key]
+    lecture["revision_dates"] = {
+        stage: merged_dates[stage]
+        for stage in REVISION_RATIOS
+        if stage in merged_dates
+    }
+    save_data(data)
 
 
 def recalculate_pending_revisions(data, lecture_id):
@@ -928,18 +887,11 @@ def view_home():
             new_exam_date = format_date_for_storage(exam_date_input)
             if data["exam_date"] != new_exam_date:
                 data["exam_date"] = new_exam_date
-
-                # Fully reflow all lecture revision timelines.
+                save_data(data)
+                # Reflow all lectures
                 for lecture_id in data["lectures"].keys():
                     reflow_revisions(data, lecture_id)
-
-                # Pending emergency revisions become stale after major timeline rebuild.
-                clear_pending_emergencies(data)
-
-                save_data(data)
-
-                st.success("Exam date updated! Entire revision ecosystem reflowed.")
-                st.rerun()
+                st.success("Exam date updated! All revisions reflowed.")
     
     with col2:
         st.metric("Days Until Exam", 
@@ -1390,9 +1342,8 @@ def view_revision_plan():
                                     changed = True
                                 
                                 if changed:
-                                    # Reflow this lecture deterministically and save once.
+                                    # Reflow revisions for both persons
                                     reflow_revisions(data, lecture_id)
-                                    save_data(data)
                                     st.success("✅ Lecture updated and revisions reflowed!")
                                     st.rerun()
                             
@@ -1483,8 +1434,7 @@ def apply_overdue_auto_fail(data, person):
 
             overdue_days = (today - revision_date).days
 
-            # softened threshold to avoid aggressive auto-fails (was >7)
-            if overdue_days > 13:
+            if overdue_days > 7:
                 overdue_candidates.append((stage, overdue_days))
 
         if overdue_candidates:
