@@ -705,21 +705,97 @@ def grade_revision(data, person, lecture_id, stage, grade):
 
 
 def reflow_revisions(data, lecture_id):
-    """Fully regenerate R1-R7 revision dates for a lecture.
+    """State-aware rebuild for a lecture.
 
-    Grade state is preserved independently in persons.grades.
+    - Completed stages (graded by any person) keep their stored dates.
+    - Pending stages are rebuilt as future workload from today to exam date.
+    - Grade state remains independent in persons.grades.
     """
     lecture = data["lectures"][lecture_id]
 
     if not data["exam_date"]:
         return
 
-    lecture["revision_dates"] = calculate_revision_dates(
-        lecture["study_date"],
-        data["exam_date"],
-        lecture["difficulty"],
-        lecture.get("interval_multiplier", 1.0)
-    )
+    exam_date = datetime.strptime(data["exam_date"], "%Y-%m-%d").date()
+    today = datetime.now().date()
+    current_dates = lecture.get("revision_dates", {})
+
+    if not current_dates:
+        current_dates = calculate_revision_dates(
+            lecture["study_date"],
+            data["exam_date"],
+            lecture["difficulty"],
+            lecture.get("interval_multiplier", 1.0)
+        )
+
+    # Split stages into completed vs pending based on grade existence.
+    completed_dates = {}
+    pending_stages = []
+    for stage in REVISION_RATIOS:
+        if stage not in current_dates:
+            continue
+
+        grade_key = f"{lecture_id}_{stage}"
+        stage_completed = any(
+            data["persons"].get(person_name, {}).get("grades", {}).get(grade_key)
+            for person_name in PERSONS
+        )
+
+        if stage_completed:
+            completed_dates[stage] = current_dates[stage]
+        else:
+            pending_stages.append(stage)
+
+    # Rebuild pending stages as future workload between today and exam date.
+    pending_dates = {}
+    if pending_stages:
+        difficulty_factor = 1.0 + (3 - lecture["difficulty"]) * 0.15
+        multiplier = lecture.get("interval_multiplier", 1.0)
+        horizon_days = max(0, (exam_date - today).days)
+        effective_horizon = max(0, int(horizon_days * difficulty_factor * multiplier))
+
+        pending_ratios = [REVISION_RATIOS[stage] for stage in pending_stages]
+        min_ratio = min(pending_ratios)
+        max_ratio = max(pending_ratios)
+        ratio_span = max_ratio - min_ratio
+
+        for stage in pending_stages:
+            ratio = REVISION_RATIOS[stage]
+            if ratio_span <= 0:
+                normalized = 1.0
+            else:
+                normalized = (ratio - min_ratio) / ratio_span
+
+            days_offset = int(effective_horizon * normalized)
+            candidate_date = today + timedelta(days=days_offset)
+            if candidate_date > exam_date:
+                candidate_date = exam_date
+
+            pending_dates[stage] = format_date_for_storage(candidate_date)
+
+    rebuilt_dates = {}
+    for stage in REVISION_RATIOS:
+        if stage in completed_dates:
+            rebuilt_dates[stage] = completed_dates[stage]
+        elif stage in pending_dates:
+            rebuilt_dates[stage] = pending_dates[stage]
+
+    lecture["revision_dates"] = rebuilt_dates
+
+
+def clear_pending_emergencies(data):
+    """Remove only ungraded emergency revisions after major timeline rebuilds."""
+    for person_name in PERSONS:
+        person_data = data.get("persons", {}).get(person_name, {})
+        emergency_map = person_data.get("emergency_revisions", {})
+        grades_map = person_data.get("grades", {})
+
+        to_delete = [
+            key for key in emergency_map
+            if not grades_map.get(key)
+        ]
+        for key in to_delete:
+            del emergency_map[key]
 
 
 def recalculate_pending_revisions(data, lecture_id):
@@ -856,6 +932,9 @@ def view_home():
                 # Fully reflow all lecture revision timelines.
                 for lecture_id in data["lectures"].keys():
                     reflow_revisions(data, lecture_id)
+
+                # Pending emergency revisions become stale after major timeline rebuild.
+                clear_pending_emergencies(data)
 
                 save_data(data)
 
