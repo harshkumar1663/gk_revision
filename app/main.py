@@ -705,18 +705,23 @@ def grade_revision(data, person, lecture_id, stage, grade):
 
 
 def reflow_revisions(data, lecture_id, person=None):
-    """Reflow only future ungraded standard revisions for a lecture.
+    """Reflow all revision stages for a lecture, recalculating all dates from scratch.
 
-    If person is provided, only that person's graded stages are treated as locked.
-    Otherwise (manual/edit reflows), any person's graded stage is locked.
+    Regenerates all R1-R7 dates based purely on:
+    - study_date
+    - exam_date
+    - difficulty
+    - interval_multiplier
+
+    Grades are preserved separately (stored as lecture_id_stage keys).
+    Does NOT call save_data() — caller must save after reflowing all lectures.
     """
     lecture = data["lectures"][lecture_id]
 
     if not data["exam_date"]:
         return
 
-    today = datetime.now().date()
-    current_dates = lecture.get("revision_dates", {})
+    # Completely regenerate all revision dates
     recalculated_dates = calculate_revision_dates(
         lecture["study_date"],
         data["exam_date"],
@@ -724,38 +729,8 @@ def reflow_revisions(data, lecture_id, person=None):
         lecture.get("interval_multiplier", 1.0)
     )
 
-    merged_dates = {}
-    for stage, current_date_str in current_dates.items():
-        current_date = datetime.strptime(current_date_str, "%Y-%m-%d").date()
-        grade_key = f"{lecture_id}_{stage}"
-        if person is not None:
-            stage_has_grade = bool(
-                data["persons"].get(person, {}).get("grades", {}).get(grade_key)
-            )
-        else:
-            stage_has_grade = any(
-                data["persons"].get(person_name, {}).get("grades", {}).get(grade_key)
-                for person_name in PERSONS
-            )
-
-        if current_date < today or stage_has_grade:
-            merged_dates[stage] = current_date_str
-        elif stage in recalculated_dates:
-            merged_dates[stage] = recalculated_dates[stage]
-        else:
-            merged_dates[stage] = current_date_str
-
-    for stage, new_date_str in recalculated_dates.items():
-        if stage not in merged_dates:
-            merged_dates[stage] = new_date_str
-
-    lecture["revision_dates"] = {
-        stage: merged_dates[stage]
-        for stage in REVISION_RATIOS
-        if stage in merged_dates
-    }
-    save_data(data)
-    # After reflow: do NOT auto-run global_balance here. Use manual "⚖️ Fix Schedule" button.
+    # Replace all revision dates with newly calculated ones
+    lecture["revision_dates"] = recalculated_dates
 
 
 def recalculate_pending_revisions(data, lecture_id):
@@ -1108,11 +1083,19 @@ def view_home():
             new_exam_date = format_date_for_storage(exam_date_input)
             if data["exam_date"] != new_exam_date:
                 data["exam_date"] = new_exam_date
-                save_data(data)
-                # Reflow all lectures
+
+                # Full ecosystem reflow: regenerate ALL revision dates from scratch
                 for lecture_id in data["lectures"].keys():
                     reflow_revisions(data, lecture_id)
-                st.success("Exam date updated! All revisions reflowed.")
+
+                # Globally rebalance schedules for both persons
+                for person in PERSONS:
+                    global_balance(data, person)
+
+                # Save once after all reflowing and balancing
+                save_data(data)
+
+                st.success("Exam date updated! Entire revision ecosystem rebalanced.")
     
     with col2:
         st.metric("Days Until Exam", 
