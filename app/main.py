@@ -887,11 +887,19 @@ def view_home():
             new_exam_date = format_date_for_storage(exam_date_input)
             if data["exam_date"] != new_exam_date:
                 data["exam_date"] = new_exam_date
-                save_data(data)
-                # Reflow all lectures
+
+                # 1. Reflow ALL lectures - regenerate all revision dates from scratch
                 for lecture_id in data["lectures"].keys():
                     reflow_revisions(data, lecture_id)
-                st.success("Exam date updated! All revisions reflowed.")
+
+                # 2. Global balance for BOTH persons
+                for person in PERSONS:
+                    global_balance(data, person)
+
+                # 3. Save once after all reflows and balancing
+                save_data(data)
+
+                st.success("Exam date updated! Entire revision ecosystem rebalanced.")
     
     with col2:
         st.metric("Days Until Exam", 
