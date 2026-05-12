@@ -802,7 +802,20 @@ def reflow_emergency_revisions(data, lecture_id):
                 continue
 
             # Preserve overdue emergencies unchanged
+            # Reflow overdue emergencies too
+            # Otherwise they become permanently frozen forever
             if em_date < today:
+                days_past = (today - em_date).days
+
+                # Pull overdue emergencies forward aggressively
+                new_date = today + timedelta(days=min(2, max(1, days_past // 2)))
+
+                # Never exceed exam ceiling
+                if new_date > exam_date:
+                    new_date = exam_date
+
+                emergency_map[em_key] = format_date_for_storage(new_date)
+                changed = True
                 continue
 
             # If emergency is beyond exam ceiling, clamp it to exam_date
