@@ -757,6 +757,76 @@ def reflow_revisions(data, lecture_id, person=None):
     save_data(data)
 
 
+def reflow_emergency_revisions(data, lecture_id):
+    """Reflow emergency revisions for a specific lecture across all persons.
+
+    Rules:
+    - Completed emergency revisions are left untouched.
+    - Overdue emergency revisions (date < today) are left untouched.
+    - Future pending emergency revisions are clamped to the exam date
+      if they exceed the exam ceiling, otherwise they're shifted closer
+      to today (pulled in by ~20%) so they don't become stale.
+
+    Emergency keys are of the form: "{lecture_id}_{stage}_emergency".
+    This function mutates `data` in-place and saves changes when needed.
+    """
+    if not data.get("exam_date"):
+        return False
+
+    today = datetime.now().date()
+    exam_date = datetime.strptime(data["exam_date"], "%Y-%m-%d").date()
+    lecture_prefix = f"{lecture_id}_"
+
+    changed = False
+
+    for person in PERSONS:
+        person_data = data["persons"].get(person, {})
+        emergency_map = person_data.setdefault("emergency_revisions", {})
+
+        # Iterate over a static list to allow safe mutation during loop
+        for em_key, em_date_str in list(emergency_map.items()):
+            # Only handle emergency keys that belong to this lecture
+            if not em_key.startswith(lecture_prefix) or not em_key.endswith("_emergency"):
+                continue
+
+            # If this emergency revision is already graded/completed, skip
+            if person_data.get("grades", {}).get(em_key):
+                continue
+
+            try:
+                em_date = datetime.strptime(em_date_str, "%Y-%m-%d").date()
+            except Exception:
+                # Malformed date -> remove it to avoid persistent bad state
+                del emergency_map[em_key]
+                changed = True
+                continue
+
+            # Preserve overdue emergencies unchanged
+            if em_date < today:
+                continue
+
+            # If emergency is beyond exam ceiling, clamp it to exam_date
+            if em_date > exam_date:
+                emergency_map[em_key] = format_date_for_storage(exam_date)
+                changed = True
+                continue
+
+            # Otherwise, pull pending emergency closer to today by 20%
+            days_until = (em_date - today).days
+            if days_until > 1:
+                new_days = max(1, int(days_until * 0.8))
+                new_date = today + timedelta(days=new_days)
+                if new_date > exam_date:
+                    new_date = exam_date
+                if new_date != em_date:
+                    emergency_map[em_key] = format_date_for_storage(new_date)
+                    changed = True
+
+    if changed:
+        return save_data(data)
+    return True
+
+
 def recalculate_pending_revisions(data, lecture_id):
     """Reset only pending standard revisions to baseline schedule for a lecture.
 
@@ -888,9 +958,13 @@ def view_home():
             if data["exam_date"] != new_exam_date:
                 data["exam_date"] = new_exam_date
                 save_data(data)
-                # Reflow all lectures
+                # Reflow all lectures (standard revisions) and also reflow
+                # any pending emergency revisions so they obey the new exam ceiling.
                 for lecture_id in data["lectures"].keys():
+                    # Reflow normal scheduled revisions (unchanged behavior)
                     reflow_revisions(data, lecture_id)
+                    # Reflow emergency revisions for this lecture across all persons
+                    reflow_emergency_revisions(data, lecture_id)
                 st.success("Exam date updated! All revisions reflowed.")
     
     with col2:
