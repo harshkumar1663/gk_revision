@@ -1018,7 +1018,9 @@ def get_backlog_count(data, person):
                 d = today
             if d < today:
                 count += 1
-        
+            else:
+                count += 1
+
     # Count emergency revisions for this person (only ungraded)
     for ekey, date_str in person_data.get("emergency_revisions", {}).items():
         if person_data.get("grades", {}).get(ekey):
